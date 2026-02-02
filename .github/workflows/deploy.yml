@@ -15,17 +15,12 @@ env:
   STACKS: "UbikaNetworkStack UbikaGatewayNetworkSecurityStack"
 
 jobs:
-  approve:
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - name: Approval gate
-        run: echo "Awaiting approval"
-
   deploy:
     runs-on: ubuntu-latest
-    needs: approve
     steps:
+      - name: Hello World
+        run: echo "🚀 Starting deployment of Ubika Infrastructure!"
+
       - name: Debug - Print environment
         run: |
           echo "=== Environment Variables ==="
