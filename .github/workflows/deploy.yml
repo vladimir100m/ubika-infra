@@ -33,7 +33,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Install dependencies
         run: uv sync
@@ -42,9 +42,9 @@ jobs:
         run: npm install -g aws-cdk
 
       - name: CDK bootstrap (if needed)
-        run: cdk bootstrap aws://$AWS_ACCOUNT_ID/${{ env.AWS_REGION }}
+        run: cdk bootstrap aws://${{ secrets.AWS_ACCOUNT_ID }}/${{ secrets.AWS_REGION }}
         env:
           AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-
+          AWS_REGION: ${{ secrets.AWS_REGION }}
       - name: Deploy stacks
         run: cdk deploy ${{ env.STACKS }} --require-approval never
