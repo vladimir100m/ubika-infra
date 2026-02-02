@@ -17,33 +17,39 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-22.04
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
-      - name: Checkout code
+      - name: Debug Info
+        run: |
+          echo "Workflow started at: $(date)"
+          echo "Runner: ${{ runner.os }}"
+          echo "GitHub Actor: ${{ github.actor }}"
+
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install uv package manager
+      - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
 
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install project dependencies
+      - name: Install dependencies
         run: uv sync
 
-      - name: Install AWS CDK CLI
+      - name: Install CDK CLI
         run: npm install -g aws-cdk
 
-      - name: Bootstrap CDK environment
+      - name: CDK bootstrap
         run: cdk bootstrap aws://${{ secrets.AWS_ACCOUNT_ID }}/${{ env.AWS_REGION }}
 
-      - name: Deploy infrastructure stacks
+      - name: Deploy stacks
         run: cdk deploy ${{ env.STACKS }} --require-approval never
