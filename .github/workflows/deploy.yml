@@ -16,7 +16,7 @@ env:
 jobs:
   deploy:
     name: Deploy to Production
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     environment: production  # Triggers manual approval & gives access to env secrets
     steps:
       - name: Checkout code
