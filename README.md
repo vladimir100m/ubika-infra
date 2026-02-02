@@ -35,23 +35,27 @@ This infrastructure includes:
 
 ## Setup
 
-1. **Create a virtual environment**:
+1. **Install uv** (if not already installed):
    ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate  # On macOS/Linux
+   curl -LsSf https://astral.sh/uv/install.sh | sh
    ```
 
 2. **Install dependencies**:
    ```bash
-   pip install -r requirements.txt
+   uv sync
    ```
 
-3. **Configure AWS credentials** (if not already done):
+3. **Run commands in the uv environment**:
+   ```bash
+   uv run python app.py
+   ```
+
+4. **Configure AWS credentials** (if not already done):
    ```bash
    aws configure
    ```
 
-4. **Bootstrap CDK** (first time only):
+5. **Bootstrap CDK** (first time only):
    ```bash
    cdk bootstrap aws://ACCOUNT-ID/REGION
    ```

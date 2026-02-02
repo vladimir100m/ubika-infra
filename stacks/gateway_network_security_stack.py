@@ -34,6 +34,7 @@ class GatewayNetworkSecurityStack(Stack):
         allowed_cidr_blocks: Optional[List[str]] = None,
         certificate_arn: Optional[str] = None,
         enable_https: bool = False,
+        enable_alb: bool = False,
         create_private_hosted_zone: bool = True,
         enable_interface_endpoints: bool = False,
         alb_subnet_group_name: str = "Isolated",
@@ -42,8 +43,11 @@ class GatewayNetworkSecurityStack(Stack):
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        if create_private_hosted_zone and (not hosted_zone_name or not record_name):
+        if enable_alb and create_private_hosted_zone and (not hosted_zone_name or not record_name):
             raise ValueError("hosted_zone_name and record_name are required")
+
+        if enable_https and not enable_alb:
+            raise ValueError("enable_alb must be True when enable_https=True")
 
         if enable_https and not certificate_arn:
             raise ValueError("certificate_arn is required when enable_https=True")
@@ -51,7 +55,7 @@ class GatewayNetworkSecurityStack(Stack):
         allowed_cidrs = allowed_cidr_blocks or [vpc.vpc_cidr_block]
 
         private_zone = None
-        if create_private_hosted_zone:
+        if enable_alb and create_private_hosted_zone:
             private_zone = route53.PrivateHostedZone(
                 self,
                 "GatewayPrivateZone",
@@ -67,21 +71,6 @@ class GatewayNetworkSecurityStack(Stack):
                 certificate_arn,
             )
 
-        alb_security_group = ec2.SecurityGroup(
-            self,
-            "GatewayAlbSecurityGroup",
-            vpc=vpc,
-            description="ALB security group for private gateway",
-            allow_all_outbound=True,
-        )
-
-        for cidr in allowed_cidrs:
-            alb_security_group.add_ingress_rule(
-                ec2.Peer.ipv4(cidr),
-                ec2.Port.tcp(443),
-                "Allow HTTPS from private/corporate networks",
-            )
-
         gateway_security_group = ec2.SecurityGroup(
             self,
             "GatewayServiceSecurityGroup",
@@ -89,54 +78,80 @@ class GatewayNetworkSecurityStack(Stack):
             description="Gateway service security group",
             allow_all_outbound=True,
         )
-        gateway_security_group.add_ingress_rule(
-            alb_security_group,
-            ec2.Port.tcp(gateway_target_port),
-            "Allow traffic from ALB",
-        )
-
-        alb = elbv2.ApplicationLoadBalancer(
-            self,
-            "GatewayAlb",
-            vpc=vpc,
-            internet_facing=False,
-            security_group=alb_security_group,
-            vpc_subnets=ec2.SubnetSelection(subnet_group_name=alb_subnet_group_name),
-        )
-
-        if enable_https:
-            alb.add_listener(
-                "HttpsListener",
-                port=443,
-                certificates=[certificate],
-                ssl_policy=elbv2.SslPolicy.RECOMMENDED,
-                default_action=elbv2.ListenerAction.fixed_response(
-                    status_code=503,
-                    message_body="Gateway not deployed yet",
-                    content_type="text/plain",
-                ),
-            )
-        else:
-            alb.add_listener(
-                "HttpListener",
-                port=80,
-                default_action=elbv2.ListenerAction.fixed_response(
-                    status_code=503,
-                    message_body="Gateway not deployed yet",
-                    content_type="text/plain",
-                ),
-            )
-
-        if private_zone is not None:
-            route53.ARecord(
+        if enable_alb:
+            alb_security_group = ec2.SecurityGroup(
                 self,
-                "GatewayDnsRecord",
-                zone=private_zone,
-                record_name=record_name,
-                target=route53.RecordTarget.from_alias(
-                    targets.LoadBalancerTarget(alb)
+                "GatewayAlbSecurityGroup",
+                vpc=vpc,
+                description="ALB security group for private gateway",
+                allow_all_outbound=True,
+            )
+
+            alb_listener_port = 443 if enable_https else 80
+            for cidr in allowed_cidrs:
+                alb_security_group.add_ingress_rule(
+                    ec2.Peer.ipv4(cidr),
+                    ec2.Port.tcp(alb_listener_port),
+                    "Allow ALB access from private/corporate networks",
+                )
+
+            gateway_security_group.add_ingress_rule(
+                alb_security_group,
+                ec2.Port.tcp(gateway_target_port),
+                "Allow traffic from ALB",
+            )
+
+            alb = elbv2.ApplicationLoadBalancer(
+                self,
+                "GatewayAlb",
+                vpc=vpc,
+                internet_facing=False,
+                security_group=alb_security_group,
+                vpc_subnets=ec2.SubnetSelection(
+                    subnet_group_name=alb_subnet_group_name
                 ),
             )
+
+            if enable_https:
+                alb.add_listener(
+                    "HttpsListener",
+                    port=443,
+                    certificates=[certificate],
+                    ssl_policy=elbv2.SslPolicy.RECOMMENDED,
+                    default_action=elbv2.ListenerAction.fixed_response(
+                        status_code=503,
+                        message_body="Gateway not deployed yet",
+                        content_type="text/plain",
+                    ),
+                )
+            else:
+                alb.add_listener(
+                    "HttpListener",
+                    port=80,
+                    default_action=elbv2.ListenerAction.fixed_response(
+                        status_code=503,
+                        message_body="Gateway not deployed yet",
+                        content_type="text/plain",
+                    ),
+                )
+
+            if private_zone is not None:
+                route53.ARecord(
+                    self,
+                    "GatewayDnsRecord",
+                    zone=private_zone,
+                    record_name=record_name,
+                    target=route53.RecordTarget.from_alias(
+                        targets.LoadBalancerTarget(alb)
+                    ),
+                )
+        else:
+            for cidr in allowed_cidrs:
+                gateway_security_group.add_ingress_rule(
+                    ec2.Peer.ipv4(cidr),
+                    ec2.Port.tcp(gateway_target_port),
+                    "Allow direct access to gateway service",
+                )
 
         vpc.add_gateway_endpoint(
             "S3GatewayEndpoint",
@@ -179,28 +194,29 @@ class GatewayNetworkSecurityStack(Stack):
                     ),
                 )
 
-        CfnOutput(
-            self,
-            "GatewayAlbDnsName",
-            value=alb.load_balancer_dns_name,
-            description="Internal ALB DNS name",
-        )
-
-        if private_zone is not None:
-            scheme = "https" if enable_https else "http"
+        if enable_alb:
             CfnOutput(
                 self,
-                "GatewayPrivateUrl",
-                value=f"{scheme}://{record_name}.{hosted_zone_name}",
-                description="Private gateway URL",
+                "GatewayAlbDnsName",
+                value=alb.load_balancer_dns_name,
+                description="Internal ALB DNS name",
             )
 
-        CfnOutput(
-            self,
-            "GatewayAlbSecurityGroupId",
-            value=alb_security_group.security_group_id,
-            description="ALB security group ID",
-        )
+            if private_zone is not None:
+                scheme = "https" if enable_https else "http"
+                CfnOutput(
+                    self,
+                    "GatewayPrivateUrl",
+                    value=f"{scheme}://{record_name}.{hosted_zone_name}",
+                    description="Private gateway URL",
+                )
+
+            CfnOutput(
+                self,
+                "GatewayAlbSecurityGroupId",
+                value=alb_security_group.security_group_id,
+                description="ALB security group ID",
+            )
 
         CfnOutput(
             self,
@@ -209,7 +225,7 @@ class GatewayNetworkSecurityStack(Stack):
             description="Gateway service security group ID",
         )
 
-        if private_zone is not None:
+        if enable_alb and private_zone is not None:
             CfnOutput(
                 self,
                 "PrivateHostedZoneId",
