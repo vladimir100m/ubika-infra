@@ -3,10 +3,11 @@ name: Deploy CDK Stacks
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
 
 permissions:
-  id-token: write  # REQUIRED for OIDC
+  id-token: write
   contents: read
 
 env:
@@ -14,36 +15,44 @@ env:
   STACKS: "UbikaNetworkStack UbikaGatewayNetworkSecurityStack"
 
 jobs:
-  deploy:
-    name: Deploy to Production
-    runs-on: ubuntu-20.04
-    environment: production  # Triggers manual approval & gives access to env secrets
+  approve:
+    runs-on: ubuntu-latest
+    environment: production
     steps:
-      - name: Checkout code
+      - name: Approval gate
+        run: echo "Awaiting approval"
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: approve
+    steps:
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          enable-cache: true
+          python-version: "3.11"
 
-      - name: Set up Python 3.11
-        run: uv python install 3.11
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          # No access keys needed here!
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Install dependencies
         run: uv sync
 
-      - name: Install AWS CDK
+      - name: Install CDK CLI
         run: npm install -g aws-cdk
 
-      - name: CDK Bootstrap & Deploy
-        run: |
-          npx cdk bootstrap aws://${{ secrets.AWS_ACCOUNT_ID }}/${{ env.AWS_REGION }}
-          npx cdk deploy ${{ env.STACKS }} --require-approval never
+      - name: CDK bootstrap (if needed)
+        run: cdk bootstrap aws://$AWS_ACCOUNT_ID/${{ env.AWS_REGION }}
+        env:
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+
+      - name: Deploy stacks
+        run: cdk deploy ${{ env.STACKS }} --require-approval never
