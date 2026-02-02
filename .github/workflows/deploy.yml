@@ -18,37 +18,16 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Hello World
-        run: echo "🚀 Starting deployment of Ubika Infrastructure!"
-
-      - name: Debug - Print environment
-        run: |
-          echo "=== Environment Variables ==="
-          echo "AWS_REGION: ${{ env.AWS_REGION }}"
-          echo "STACKS: ${{ env.STACKS }}"
-          echo "GitHub Actor: ${{ github.actor }}"
-          echo "GitHub Ref: ${{ github.ref }}"
-          echo "=== End Environment ==="
-
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Debug - Verify checkout
-        run: ls -la && echo "Checkout successful"
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Debug - Python version
-        run: python --version && python -m pip --version
-
       - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
-
-      - name: Debug - uv installation
-        run: uv --version
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -56,33 +35,14 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Debug - AWS credentials
-        run: |
-          aws sts get-caller-identity
-          echo "AWS Region: $(aws configure get region)"
-
       - name: Install dependencies
         run: uv sync
-
-      - name: Debug - Dependencies installed
-        run: |
-          echo "=== Installed packages ==="
-          uv pip list
-          echo "=== End packages ==="
 
       - name: Install CDK CLI
         run: npm install -g aws-cdk
 
-      - name: Debug - CDK version
-        run: cdk --version
-
-      - name: CDK bootstrap (if needed)
+      - name: CDK bootstrap
         run: cdk bootstrap aws://${{ secrets.AWS_ACCOUNT_ID }}/${{ env.AWS_REGION }}
-        env:
-          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-
-      - name: Debug - CDK synthesis
-        run: cdk synth
 
       - name: Deploy stacks
         run: cdk deploy ${{ env.STACKS }} --require-approval never
