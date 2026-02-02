@@ -3,11 +3,10 @@ name: Deploy CDK Stacks
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [main]
 
 permissions:
-  id-token: write
+  id-token: write  # REQUIRED for OIDC
   contents: read
 
 env:
@@ -16,19 +15,21 @@ env:
 
 jobs:
   deploy:
+    name: Deploy Infrastructure
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    environment: production  # This creates the "Manual Approval" gate in GitHub
+    
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
       - name: Install uv
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -37,15 +38,12 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --frozen
 
       - name: Install CDK CLI
         run: npm install -g aws-cdk
 
-      - name: CDK bootstrap (if needed)
-        run: cdk bootstrap aws://$AWS_ACCOUNT_ID/${{ env.AWS_REGION }}
-        env:
-          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-
-      - name: Deploy stacks
-        run: cdk deploy ${{ env.STACKS }} --require-approval never
+      - name: CDK Bootstrap & Deploy
+        run: |
+          npx cdk bootstrap aws://${{ secrets.AWS_ACCOUNT_ID }}/${{ env.AWS_REGION }}
+          npx cdk deploy ${{ env.STACKS }} --require-approval never
