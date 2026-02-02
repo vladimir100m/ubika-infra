@@ -78,6 +78,7 @@ class GatewayNetworkSecurityStack(Stack):
             description="Gateway service security group",
             allow_all_outbound=True,
         )
+        self.gateway_security_group = gateway_security_group
         if enable_alb:
             alb_security_group = ec2.SecurityGroup(
                 self,
