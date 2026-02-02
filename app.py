@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import aws_cdk as cdk
 
+from stacks.compute_stack import ComputeStack
 from stacks.gateway_network_security_stack import GatewayNetworkSecurityStack
 from stacks.network_stack import NetworkStack
 
@@ -70,6 +71,17 @@ alb_subnet_group_name = app.node.try_get_context("alb_subnet_group_name") or (
     "Private" if enable_private_egress_subnets else "Isolated"
 )
 
+ecs_subnet_group_name = app.node.try_get_context("ecs_subnet_group_name") or (
+    "Private" if enable_private_egress_subnets else "Isolated"
+)
+ecs_container_port = _to_int(app.node.try_get_context("ecs_container_port"), 4000)
+ecs_desired_count = _to_int(app.node.try_get_context("ecs_desired_count"), 0)
+ecs_cpu = _to_int(app.node.try_get_context("ecs_cpu"), 256)
+ecs_memory_mib = _to_int(app.node.try_get_context("ecs_memory_mib"), 512)
+ecr_repository_name = (
+    app.node.try_get_context("ecr_repository_name") or "ubika-gateway"
+)
+
 allowed_cidrs_context = app.node.try_get_context("allowed_cidrs")
 if isinstance(allowed_cidrs_context, str):
     allowed_cidr_blocks = [
@@ -80,7 +92,7 @@ elif isinstance(allowed_cidrs_context, list):
 else:
     allowed_cidr_blocks = [network_stack.vpc.vpc_cidr_block]
 
-GatewayNetworkSecurityStack(
+gateway_stack = GatewayNetworkSecurityStack(
     app,
     "UbikaGatewayNetworkSecurityStack",
     description="Private VPC-only networking and security layer for LLM gateway",
@@ -93,6 +105,24 @@ GatewayNetworkSecurityStack(
     create_private_hosted_zone=create_private_hosted_zone,
     enable_interface_endpoints=enable_interface_endpoints,
     alb_subnet_group_name=alb_subnet_group_name,
+    env=cdk.Environment(
+        account=app.node.try_get_context("account"),
+        region=app.node.try_get_context("region"),
+    ),
+)
+
+ComputeStack(
+    app,
+    "UbikaComputeStack",
+    description="ECS Fargate compute layer for gateway services",
+    vpc=network_stack.vpc,
+    service_security_group=gateway_stack.gateway_security_group,
+    ecs_subnet_group_name=ecs_subnet_group_name,
+    container_port=ecs_container_port,
+    desired_count=ecs_desired_count,
+    cpu=ecs_cpu,
+    memory_mib=ecs_memory_mib,
+    repository_name=ecr_repository_name,
     env=cdk.Environment(
         account=app.node.try_get_context("account"),
         region=app.node.try_get_context("region"),
