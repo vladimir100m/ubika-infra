@@ -15,9 +15,17 @@ env:
   STACKS: "UbikaNetworkStack UbikaGatewayNetworkSecurityStack"
 
 jobs:
+  approve:
+    runs-on: ubuntu-22.04
+    environment: production
+    steps:
+      - name: Approve deployment
+        run: echo "✅ Deployment approved for production"
+
   deploy:
     runs-on: ubuntu-22.04
     timeout-minutes: 10
+    needs: approve
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
