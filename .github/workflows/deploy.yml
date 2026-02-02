@@ -12,31 +12,28 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
+  # Moving stacks to a single variable for easier maintenance
   STACKS: "UbikaNetworkStack UbikaGatewayNetworkSecurityStack"
 
 jobs:
-  approve:
-    runs-on: ubuntu-22.04
-    environment: production
-    steps:
-      - name: Approve deployment
-        run: echo "✅ Deployment approved for production"
-
   deploy:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 10
-    needs: approve
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    environment: production  # This creates the manual approval gate
+    timeout-minutes: 20      # Increased slightly as CDK bootstrap + deploy can be slow
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.11"
+          enable-cache: true
+          version: "latest"
 
-      - name: Install uv package manager
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Set up Python 3.11
+        run: uv python install 3.11
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -44,14 +41,13 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install project dependencies
-        run: uv sync
+      - name: Install dependencies
+        run: uv sync --frozen
 
       - name: Install AWS CDK CLI
         run: npm install -g aws-cdk
 
-      - name: Bootstrap CDK environment
-        run: cdk bootstrap aws://${{ secrets.AWS_ACCOUNT_ID }}/${{ env.AWS_REGION }}
-
-      - name: Deploy infrastructure stacks
-        run: cdk deploy ${{ env.STACKS }} --require-approval never
+      - name: CDK Bootstrap & Deploy
+        run: |
+          npx cdk bootstrap aws://${{ secrets.AWS_ACCOUNT_ID }}/${{ env.AWS_REGION }}
+          npx cdk deploy ${{ env.STACKS }} --require-approval never
