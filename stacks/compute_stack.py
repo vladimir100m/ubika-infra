@@ -3,12 +3,14 @@ from typing import Optional
 from aws_cdk import (
     CfnOutput,
     RemovalPolicy,
+    SecretValue,
     Stack,
 )
 from constructs import Construct
 import aws_cdk.aws_ec2 as ec2
 import aws_cdk.aws_ecr as ecr
 import aws_cdk.aws_ecs as ecs
+import aws_cdk.aws_elasticloadbalancingv2 as elbv2
 import aws_cdk.aws_iam as iam
 import aws_cdk.aws_logs as logs
 import aws_cdk.aws_rds as rds
@@ -38,6 +40,8 @@ class ComputeStack(Stack):
         db_instance: Optional[rds.IDatabaseInstance] = None,
         db_credentials_secret: Optional[secretsmanager.ISecret] = None,
         db_security_group: Optional[ec2.ISecurityGroup] = None,
+        target_group: Optional[elbv2.IApplicationTargetGroup] = None,
+        alb_security_group: Optional[ec2.ISecurityGroup] = None,
         ecs_subnet_group_name: str = "Public",
         container_port: int = 4000,
         desired_count: int = 0,
@@ -65,7 +69,7 @@ class ComputeStack(Stack):
             cpu=cpu,
             memory_limit_mib=memory_mib,
             runtime_platform=ecs.RuntimePlatform(
-                cpu_architecture=ecs.CpuArchitecture.ARM64,
+                cpu_architecture=ecs.CpuArchitecture.X86_64,
                 operating_system_family=ecs.OperatingSystemFamily.LINUX,
             ),
         )
@@ -133,7 +137,7 @@ class ComputeStack(Stack):
             self,
             "LiteLLMMasterKeySecret",
             secret_name=f"{self.stack_name}/litellm-master-key",
-            secret_string_value=secretsmanager.SecretValue.unsafe_plain_text(
+            secret_string_value=SecretValue.unsafe_plain_text(
                 litellm_master_key
             ),
             description="Master key for LiteLLM proxy authentication",
@@ -150,30 +154,29 @@ class ComputeStack(Stack):
 
         # Build environment variables
         environment_vars = {
-            "AWS_REGION_NAME": "us-east-1",
+            "AWS_REGION_NAME": self.region,
         }
 
-        # Build secrets (for database URL from Secrets Manager)
+        # Build secrets from Secrets Manager
         secrets = {
             "LITELLM_MASTER_KEY": ecs.Secret.from_secrets_manager(
-                litellm_master_key_secret, "master_key"
+                litellm_master_key_secret
             )
         }
-        if db_instance and db_credentials_secret:
-            # Construct DATABASE_URL from parts
-            db_endpoint = db_instance.db_instance_endpoint_address
-            db_port = db_instance.db_instance_endpoint_port
-            db_name = "litellm"
-            
-            environment_vars["DB_ENDPOINT"] = db_endpoint
-            environment_vars["DB_PORT"] = str(db_port)
-            environment_vars["DB_NAME"] = db_name
-            
+
+        # Add database configuration from Secrets Manager if available
+        if db_credentials_secret and db_instance:
+            # Provide individual DB fields
+            environment_vars["DB_ENDPOINT"] = db_instance.db_instance_endpoint_address
+            environment_vars["DB_PORT"] = str(db_instance.db_instance_endpoint_port)
+            environment_vars["DB_NAME"] = "litellm"
             secrets["DB_USERNAME"] = ecs.Secret.from_secrets_manager(
-                db_credentials_secret, "username"
+                db_credentials_secret,
+                field="username"
             )
             secrets["DB_PASSWORD"] = ecs.Secret.from_secrets_manager(
-                db_credentials_secret, "password"
+                db_credentials_secret,
+                field="password"
             )
 
         container = task_definition.add_container(
@@ -184,7 +187,7 @@ class ComputeStack(Stack):
                 log_group=log_group,
             ),
             environment=environment_vars,
-            secrets=secrets if secrets else None,
+            secrets=secrets,
             command=[
                 "--config", "/app/config.yaml",
                 "--host", "0.0.0.0",
@@ -205,18 +208,30 @@ class ComputeStack(Stack):
                 allow_all_outbound=True,
             )
 
+        # Allow inbound from ALB if provided
+        if alb_security_group:
+            service_security_group.add_ingress_rule(
+                peer=alb_security_group,
+                connection=ec2.Port.tcp(container_port),
+                description="Allow inbound from ALB",
+            )
+
         service = ecs.FargateService(
             self,
             "GatewayService",
             cluster=cluster,
             task_definition=task_definition,
             desired_count=desired_count,
-            assign_public_ip=True,
+            assign_public_ip=False,
             security_groups=[service_security_group],
             vpc_subnets=ec2.SubnetSelection(
                 subnet_group_name=ecs_subnet_group_name
             ),
         )
+
+        # Register service with ALB target group if provided
+        if target_group:
+            service.attach_to_application_target_group(target_group)
 
         # Allow ECS tasks to connect to database
         if db_security_group and db_instance:
@@ -225,13 +240,6 @@ class ComputeStack(Stack):
                 connection=ec2.Port.tcp(5432),  # PostgreSQL default port
                 description="Allow ECS tasks to connect to PostgreSQL",
             )
-
-        CfnOutput(
-            self,
-            "EcsTaskPublicAccessUrl",
-            value=f"Note: Access ECS tasks at their public IPs on port {container_port}",
-            description="ECS tasks will have public IPs assigned",
-        )
 
         CfnOutput(
             self,

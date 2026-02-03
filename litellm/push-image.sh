@@ -8,13 +8,12 @@
 
 set -e
 
-GHCR_IMAGE="ghcr.io/berriai/litellm:main-latest"
 ECR_REPO_NAME="ubika-gateway"
 
 echo "📦 Setting up ECR repository URI..."
 
-# Get AWS account ID and region from environment or defaults
-AWS_ACCOUNT="${AWS_ACCOUNT_ID:-703544859494}"
+# Get AWS account ID and region from environment
+AWS_ACCOUNT="${AWS_ACCOUNT_ID:?AWS_ACCOUNT_ID must be set}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 ECR_REPO_URI="${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}"
 
@@ -27,7 +26,7 @@ aws ecr get-login-password --region "$AWS_REGION" | \
   docker login --username AWS --password-stdin "$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com"
 
 echo "🏗️  Building custom LiteLLM image with config..."
-docker build --platform linux/arm64 -t "$ECR_REPO_URI:latest" .
+docker build --platform linux/amd64 -t "$ECR_REPO_URI:latest" .
 
 echo "⬆️  Pushing image to ECR..."
 docker push "$ECR_REPO_URI:latest"

@@ -17,7 +17,7 @@ class GatewayNetworkSecurityStack(Stack):
     Networking and security layer for LiteLLM gateway.
 
     Creates:
-    - Security group for ECS tasks (allows inbound on gateway_target_port from anywhere)
+    - Security group for ECS tasks (public access optional)
     """
 
     def __init__(
@@ -27,26 +27,28 @@ class GatewayNetworkSecurityStack(Stack):
         *,
         vpc: ec2.IVpc,
         gateway_target_port: int = 4000,
+        allow_public_access: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # Gateway service security group - allows public access on gateway port
+        # Gateway service security group
         gateway_security_group = ec2.SecurityGroup(
             self,
             "GatewayServiceSecurityGroup",
             vpc=vpc,
-            description="Gateway service security group - allows public access",
+            description="Gateway service security group",
             allow_all_outbound=True,
         )
         self.gateway_security_group = gateway_security_group
 
-        # Allow inbound traffic from anywhere on gateway port
-        gateway_security_group.add_ingress_rule(
-            ec2.Peer.any_ipv4(),
-            ec2.Port.tcp(gateway_target_port),
-            "Allow public access to gateway service",
-        )
+        # Optional public access on gateway port (typically disabled when using ALB)
+        if allow_public_access:
+            gateway_security_group.add_ingress_rule(
+                ec2.Peer.any_ipv4(),
+                ec2.Port.tcp(gateway_target_port),
+                "Allow public access to gateway service",
+            )
 
         # VPC S3 Gateway Endpoint
         vpc.add_gateway_endpoint(

@@ -1,4 +1,4 @@
-FROM ghcr.io/berriai/litellm:main-latest
+FROM docker.litellm.ai/berriai/litellm:main-latest
 
 # Copy configuration file
 COPY litellm_config.yaml /app/config.yaml

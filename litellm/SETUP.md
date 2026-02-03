@@ -5,7 +5,7 @@
 ### 1. litellm_config.yaml
 Configuration file for LiteLLM with AWS Bedrock models:
 - **Location**: `/Users/vlad/project/ubika-infra/litellm/litellm_config.yaml`
-- **Master Key**: `sk-ubika-master-2026` (change in production!)
+- **Master Key**: `<LITELLM_MASTER_KEY>` (set your own in production)
 - **Models configured**:
   - `claude-3-sonnet` → AWS Bedrock Claude Sonnet
   - `claude-3-haiku` → AWS Bedrock Claude Haiku (cheaper)
@@ -14,8 +14,8 @@ Configuration file for LiteLLM with AWS Bedrock models:
 ### 2. Environment Variables
 Set in `.env` file:
 ```bash
-LITELLM_MASTER_KEY="sk-ubika-master-2026"
-LITELLM_SALT_KEY="sk-ubika-salt-2026"
+LITELLM_MASTER_KEY="<LITELLM_MASTER_KEY>"
+LITELLM_SALT_KEY="<LITELLM_SALT_KEY>"
 ```
 
 ## Deployment Steps
@@ -29,7 +29,7 @@ cd /Users/vlad/project/ubika-infra/litellm
 This will:
 - Build a custom LiteLLM image with your config baked in
 - Build for ARM64 architecture (matches ECS Fargate ARM64)
-- Push to ECR at: `703544859494.dkr.ecr.us-east-1.amazonaws.com/ubika-gateway:latest`
+- Push to ECR at: `<ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/ubika-gateway:latest`
 
 ### Step 2: Deploy Updated ECS Stack
 ```bash
@@ -45,28 +45,28 @@ This updates the ECS task definition with:
 ### Step 3: Scale Up ECS Service
 ```bash
 aws ecs update-service \
-  --cluster UbikaComputeStack-GatewayCluster30039C24-vZisBhp59ufP \
-  --service UbikaComputeStack-GatewayService20F4B805-ZiMSudLC6m2O \
+  --cluster <ECS_CLUSTER_NAME> \
+  --service <ECS_SERVICE_NAME> \
   --desired-count 1 \
-  --region us-east-1
+  --region <AWS_REGION>
 ```
 
 ### Step 4: Get Public IP and Test
 ```bash
 # Wait for task to be RUNNING
 aws ecs list-tasks \
-  --cluster UbikaComputeStack-GatewayCluster30039C24-vZisBhp59ufP \
-  --service-name UbikaComputeStack-GatewayService20F4B805-ZiMSudLC6m2O \
-  --region us-east-1
+  --cluster <ECS_CLUSTER_NAME> \
+  --service-name <ECS_SERVICE_NAME> \
+  --region <AWS_REGION>
 
 # Get task ARN (replace <task-id> with actual ID from above)
-TASK_ARN="arn:aws:ecs:us-east-1:703544859494:task/UbikaComputeStack-GatewayCluster30039C24-vZisBhp59ufP/<task-id>"
+TASK_ARN="arn:aws:ecs:<AWS_REGION>:<ACCOUNT_ID>:task/<ECS_CLUSTER_NAME>/<task-id>"
 
 # Get public IP
 PUBLIC_IP=$(aws ecs describe-tasks \
-  --cluster UbikaComputeStack-GatewayCluster30039C24-vZisBhp59ufP \
+  --cluster <ECS_CLUSTER_NAME> \
   --tasks $TASK_ARN \
-  --region us-east-1 \
+  --region <AWS_REGION> \
   --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' \
   --output text | xargs -I {} aws ec2 describe-network-interfaces \
   --network-interface-ids {} \
@@ -81,7 +81,7 @@ curl http://$PUBLIC_IP:4000/health
 # Test chat completion
 curl -X POST "http://$PUBLIC_IP:4000/chat/completions" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-ubika-master-2026" \
+  -H "Authorization: Bearer <LITELLM_MASTER_KEY>" \
   -d '{
     "model": "claude-3-haiku",
     "messages": [
