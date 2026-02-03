@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
+import os
 import aws_cdk as cdk
+from dotenv import load_dotenv
 
 from stacks.compute_stack import ComputeStack
+from stacks.database_stack import DatabaseStack
 from stacks.gateway_network_security_stack import GatewayNetworkSecurityStack
 from stacks.network_stack import NetworkStack
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 app = cdk.App()
@@ -28,18 +34,60 @@ def _to_int(value, default=0):
         return default
 
 
-max_azs = _to_int(app.node.try_get_context("max_azs"), 1)
-nat_gateways = _to_int(app.node.try_get_context("nat_gateways"), 0)
+max_azs = _to_int(app.node.try_get_context("max_azs"), int(os.getenv("MAX_AZS", "1")))
+nat_gateways = _to_int(app.node.try_get_context("nat_gateways"), int(os.getenv("NAT_GATEWAYS", "0")))
 enable_public_subnets = _to_bool(
-    app.node.try_get_context("enable_public_subnets"), False
+    app.node.try_get_context("enable_public_subnets"), 
+    _to_bool(os.getenv("ENABLE_PUBLIC_SUBNETS"), True)
 )
 enable_private_egress_subnets = _to_bool(
-    app.node.try_get_context("enable_private_egress_subnets"), False
+    app.node.try_get_context("enable_private_egress_subnets"),
+    _to_bool(os.getenv("ENABLE_PRIVATE_EGRESS_SUBNETS"), False)
 )
 enable_isolated_subnets = _to_bool(
-    app.node.try_get_context("enable_isolated_subnets"), True
+    app.node.try_get_context("enable_isolated_subnets"),
+    _to_bool(os.getenv("ENABLE_ISOLATED_SUBNETS"), True)
 )
-enable_flow_logs = _to_bool(app.node.try_get_context("enable_flow_logs"), False)
+enable_flow_logs = _to_bool(
+    app.node.try_get_context("enable_flow_logs"),
+    _to_bool(os.getenv("ENABLE_FLOW_LOGS"), False)
+)
+
+# ALB configuration
+enable_alb = _to_bool(
+    app.node.try_get_context("enable_alb"),
+    _to_bool(os.getenv("ENABLE_ALB"), True)
+)
+alb_target_port = _to_int(app.node.try_get_context("alb_target_port"), int(os.getenv("ALB_TARGET_PORT", "4000")))
+
+# ALB configuration
+enable_alb = _to_bool(
+    app.node.try_get_context("enable_alb"),
+    _to_bool(os.getenv("ENABLE_ALB"), False)
+)
+alb_target_port = _to_int(app.node.try_get_context("alb_target_port"), int(os.getenv("ALB_TARGET_PORT", "4000")))
+
+# ECS configuration
+ecs_subnet_group_name = app.node.try_get_context("ecs_subnet_group_name") or os.getenv("ECS_SUBNET_GROUP_NAME", "Public")
+ecs_container_port = _to_int(app.node.try_get_context("ecs_container_port"), int(os.getenv("ECS_CONTAINER_PORT", "4000")))
+ecs_desired_count = _to_int(app.node.try_get_context("ecs_desired_count"), int(os.getenv("ECS_DESIRED_COUNT", "0")))
+ecs_cpu = _to_int(app.node.try_get_context("ecs_cpu"), int(os.getenv("ECS_CPU", "256")))
+ecs_memory_mib = _to_int(app.node.try_get_context("ecs_memory_mib"), int(os.getenv("ECS_MEMORY_MIB", "512")))
+litellm_master_key = app.node.try_get_context("litellm_master_key") or os.getenv("LITELLM_MASTER_KEY", "sk-ubika-master-2026")
+
+# Other configuration
+enable_interface_endpoints = _to_bool(
+    app.node.try_get_context("enable_interface_endpoints"),
+    _to_bool(os.getenv("ENABLE_INTERFACE_ENDPOINTS"), False)
+)
+
+# ECR configuration
+ecr_repository_name = app.node.try_get_context("ecr_repository_name") or os.getenv("ECR_REPOSITORY_NAME", "ubika-gateway")
+account_id = app.node.try_get_context("account") or os.getenv("ACCOUNT_ID", "703544859494")
+region = app.node.try_get_context("region") or os.getenv("AWS_REGION", "us-east-1")
+
+# Construct ECR repository URI dynamically
+ecr_repository_uri = f"{account_id}.dkr.ecr.{region}.amazonaws.com/{ecr_repository_name}"
 
 network_stack = NetworkStack(
     app,
@@ -57,72 +105,48 @@ network_stack = NetworkStack(
     ),
 )
 
-hosted_zone_name = app.node.try_get_context("hosted_zone_name") or "example.internal"
-record_name = app.node.try_get_context("record_name") or "genai"
-certificate_arn = app.node.try_get_context("certificate_arn")
-enable_https = _to_bool(app.node.try_get_context("enable_https"), False)
-create_private_hosted_zone = _to_bool(
-    app.node.try_get_context("create_private_hosted_zone"), False
-)
-enable_interface_endpoints = _to_bool(
-    app.node.try_get_context("enable_interface_endpoints"), False
-)
-alb_subnet_group_name = app.node.try_get_context("alb_subnet_group_name") or (
-    "Private" if enable_private_egress_subnets else "Isolated"
-)
-
-ecs_subnet_group_name = app.node.try_get_context("ecs_subnet_group_name") or (
-    "Private" if enable_private_egress_subnets else "Isolated"
-)
-ecs_container_port = _to_int(app.node.try_get_context("ecs_container_port"), 4000)
-ecs_desired_count = _to_int(app.node.try_get_context("ecs_desired_count"), 0)
-ecs_cpu = _to_int(app.node.try_get_context("ecs_cpu"), 256)
-ecs_memory_mib = _to_int(app.node.try_get_context("ecs_memory_mib"), 512)
-ecr_repository_name = (
-    app.node.try_get_context("ecr_repository_name") or "ubika-gateway"
-)
-
-allowed_cidrs_context = app.node.try_get_context("allowed_cidrs")
-if isinstance(allowed_cidrs_context, str):
-    allowed_cidr_blocks = [
-        cidr.strip() for cidr in allowed_cidrs_context.split(",") if cidr.strip()
-    ]
-elif isinstance(allowed_cidrs_context, list):
-    allowed_cidr_blocks = [cidr for cidr in allowed_cidrs_context if cidr]
-else:
-    allowed_cidr_blocks = [network_stack.vpc.vpc_cidr_block]
-
+# Create gateway security stack
 gateway_stack = GatewayNetworkSecurityStack(
     app,
     "UbikaGatewayNetworkSecurityStack",
-    description="Private VPC-only networking and security layer for LLM gateway",
+    description="Security layer for LiteLLM gateway - allows public access",
     vpc=network_stack.vpc,
-    hosted_zone_name=hosted_zone_name,
-    record_name=record_name,
-    allowed_cidr_blocks=allowed_cidr_blocks,
-    certificate_arn=certificate_arn,
-    enable_https=enable_https,
-    create_private_hosted_zone=create_private_hosted_zone,
-    enable_interface_endpoints=enable_interface_endpoints,
-    alb_subnet_group_name=alb_subnet_group_name,
+    gateway_target_port=ecs_container_port,
     env=cdk.Environment(
         account=app.node.try_get_context("account"),
         region=app.node.try_get_context("region"),
     ),
 )
 
-ComputeStack(
+# Create database stack
+database_stack = DatabaseStack(
+    app,
+    "UbikaDatabaseStack",
+    description="PostgreSQL database for LiteLLM proxy",
+    vpc=network_stack.vpc,
+    database_name="litellm",
+    env=cdk.Environment(
+        account=app.node.try_get_context("account"),
+        region=app.node.try_get_context("region"),
+    ),
+)
+
+compute_stack = ComputeStack(
     app,
     "UbikaComputeStack",
     description="ECS Fargate compute layer for gateway services",
     vpc=network_stack.vpc,
+    ecr_repository_uri=ecr_repository_uri,
     service_security_group=gateway_stack.gateway_security_group,
+    db_instance=database_stack.db_instance,
+    db_credentials_secret=database_stack.db_instance.secret,
+    db_security_group=database_stack.db_security_group,
     ecs_subnet_group_name=ecs_subnet_group_name,
     container_port=ecs_container_port,
     desired_count=ecs_desired_count,
     cpu=ecs_cpu,
     memory_mib=ecs_memory_mib,
-    repository_name=ecr_repository_name,
+    litellm_master_key=litellm_master_key,
     env=cdk.Environment(
         account=app.node.try_get_context("account"),
         region=app.node.try_get_context("region"),

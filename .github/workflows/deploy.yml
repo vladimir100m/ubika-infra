@@ -44,6 +44,11 @@ jobs:
         run: npm install -g aws-cdk
 
       - name: CDK Bootstrap & Deploy
+        env:
+          ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+          LITELLM_MASTER_KEY: ${{ secrets.LITELLM_MASTER_KEY }}
         run: |
           npx cdk bootstrap aws://${{ secrets.AWS_ACCOUNT_ID }}/${{ env.AWS_REGION }}
           npx cdk deploy ${{ env.STACKS }} --require-approval never
+          npx cdk deploy UbikaComputeStack UbikaDatabaseStack --require-approval never
