@@ -65,8 +65,7 @@ terraform_plan() {
   local dir
   dir="$(resolve_dir "$layer")"
 
-  terraform -chdir="$dir" init -input=false
-  terraform -chdir="$dir" fmt -check -recursive
+  terraform -chdir="$dir" init -input=false -reconfigure -backend-config=backend.hcl
   terraform -chdir="$dir" validate
   terraform -chdir="$dir" plan -no-color -input=false -out=tfplan
 }
@@ -76,6 +75,7 @@ terraform_apply() {
   local dir
   dir="$(resolve_dir "$layer")"
 
+  terraform -chdir="$dir" init -input=false -reconfigure -backend-config=backend.hcl
   terraform -chdir="$dir" apply -auto-approve -input=false tfplan
 }
 
