@@ -88,6 +88,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
       - name: Prebuild & Terraform Check
         id: prebuild
         shell: bash
@@ -99,12 +105,6 @@ jobs:
           cat prebuild_output.txt
           TF_CHANGED=$(grep TF_CHANGED prebuild_output.txt | cut -d'=' -f2)
           echo "tf_changed=$TF_CHANGED" >> "$GITHUB_OUTPUT"
-
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
