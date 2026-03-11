@@ -38,7 +38,16 @@ detect_layers() {
     [[ -z "$file" ]] && continue
     local rel="${file#infra/}"
     if [[ "$rel" == */* ]]; then
-      layers+=("${rel%%/*}")
+      local candidate="${rel%%/*}"
+      local candidate_dir
+      candidate_dir="$(resolve_dir "$candidate")"
+      # Only treat as a standalone layer if it has its own providers.tf;
+      # otherwise it is a module and its changes are deployed via root.
+      if [[ -f "$candidate_dir/providers.tf" ]]; then
+        layers+=("$candidate")
+      else
+        layers+=("root")
+      fi
     else
       layers+=("root")
     fi
@@ -52,7 +61,7 @@ detect_layers() {
     [[ -z "$layer" ]] && continue
     local dir
     dir="$(resolve_dir "$layer")"
-    if [[ -d "$dir" ]] && compgen -G "$dir/*.tf" > /dev/null; then
+    if [[ -d "$dir" ]] && [[ -f "$dir/providers.tf" ]]; then
       deploy_layers+=("$layer")
     fi
   done <<< "$unique_layers"
@@ -66,6 +75,7 @@ terraform_plan() {
   dir="$(resolve_dir "$layer")"
 
   terraform -chdir="$dir" init -input=false -reconfigure -backend-config=backend.hcl
+  terraform -chdir="$dir" fmt -check -recursive
   terraform -chdir="$dir" validate
   terraform -chdir="$dir" plan -no-color -input=false -out=tfplan
 }
