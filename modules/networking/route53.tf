@@ -1,0 +1,25 @@
+locals {
+  use_route53                  = var.use_route53 && var.hostedZoneName != ""
+  create_private_load_balancer = var.use_route53 && !var.publicLoadBalancer ? local.creating_new_vpc || var.create_private_hosted_zone_in_existing_vpc ? true : false : false
+  import_private_load_balancer = var.use_route53 && !var.publicLoadBalancer ? !local.create_private_load_balancer : false
+}
+
+data "aws_route53_zone" "public_zone" {
+  count        = local.use_route53 && var.publicLoadBalancer ? 1 : 0
+  name         = var.hostedZoneName
+  private_zone = false
+}
+
+resource "aws_route53_zone" "new_private_zone" {
+  count = local.create_private_load_balancer ? 1 : 0
+  name  = var.hostedZoneName
+  vpc {
+    vpc_id = local.final_vpc_id
+  }
+}
+
+data "aws_route53_zone" "existing_private_zone" {
+  count        = local.import_private_load_balancer ? 1 : 0
+  name         = var.hostedZoneName
+  private_zone = true
+}
