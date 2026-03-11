@@ -37,9 +37,9 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
       },
       # ── EC2 / VPC ──────────────────────────────────────────────────────
       {
-        Sid    = "EC2VPC"
-        Effect = "Allow"
-        Action = ["ec2:*"]
+        Sid      = "EC2VPC"
+        Effect   = "Allow"
+        Action   = ["ec2:*"]
         Resource = "*"
       },
       # ── IAM – scoped to roles this stack creates ────────────────────────
