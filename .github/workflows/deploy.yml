@@ -116,15 +116,17 @@ jobs:
             "${{ needs.changes.outputs.head_sha }}" > prebuild_output.txt
           cat prebuild_output.txt
           TF_CHANGED=$(grep TF_CHANGED prebuild_output.txt | cut -d'=' -f2)
+          FORCE_DEPLOY=$(grep FORCE_DEPLOY prebuild_output.txt | cut -d'=' -f2)
           echo "tf_changed=$TF_CHANGED" >> "$GITHUB_OUTPUT"
+          echo "force_deploy=$FORCE_DEPLOY" >> "$GITHUB_OUTPUT"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
       - name: Terraform Plan
-        if: steps.prebuild.outputs.tf_changed == '1'
+        if: steps.prebuild.outputs.tf_changed == '1' || steps.prebuild.outputs.force_deploy == '1'
         run: bash scripts/deploy.sh terraform-plan "${{ matrix.layer }}"
 
       - name: Terraform Apply
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && steps.prebuild.outputs.tf_changed == '1'
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && (steps.prebuild.outputs.tf_changed == '1' || steps.prebuild.outputs.force_deploy == '1')
         run: bash scripts/deploy.sh terraform-apply "${{ matrix.layer }}"

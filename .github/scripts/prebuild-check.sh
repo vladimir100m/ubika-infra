@@ -46,10 +46,20 @@ run_prebuild_scripts() {
 run_prebuild_scripts
 
 TF_CHANGED=0
+FORCE_DEPLOY=0
+
 if [[ -z "$BASE_SHA" || -z "$HEAD_SHA" ]]; then
   TF_CHANGED=1
 elif git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -E "^${LAYER_DIR}/.*\.tf$" >/dev/null; then
   TF_CHANGED=1
 fi
 
+if [[ -z "$BASE_SHA" || -z "$HEAD_SHA" ]]; then
+  FORCE_DEPLOY=0
+elif git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -E "^${LAYER_DIR}/(force\.deploy|.prebuild\.sh)$" >/dev/null; then
+  FORCE_DEPLOY=1
+  TF_CHANGED=1
+fi
+
 echo "TF_CHANGED=$TF_CHANGED"
+echo "FORCE_DEPLOY=$FORCE_DEPLOY"
