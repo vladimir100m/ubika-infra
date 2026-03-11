@@ -27,10 +27,18 @@ variable "hostedZoneName" {
 
 variable "publicLoadBalancer" {
   description = "Whether the load balancer is public or private"
-  type = bool
+  type        = bool
+  default     = true
 }
 
 variable "create_private_hosted_zone_in_existing_vpc" {
   description = "In the case publicLoadBalancer=false (meaning we need a private hosted zone), and an vpc_id is provided, decides whether we create a private hosted zone, or assume one already exists and import it"
   type        = bool
+  default     = false
+}
+
+variable "use_route53" {
+  description = "Whether to use Route53 for DNS resources in the base module"
+  type        = bool
+  default     = false
 }
