@@ -264,8 +264,8 @@ resource "aws_secretsmanager_secret_version" "llm_api_keys" {
 resource "aws_s3_object" "config_yaml" {
   bucket = module.config_bucket.bucket_id
   key    = "config.yaml"
-  source = "${path.root}/../../../../tmp_litellm/config/config.yaml"
-  etag   = filemd5("${path.root}/../../../../tmp_litellm/config/config.yaml")
+  source = "${path.root}/../config/config.yaml"
+  etag   = filemd5("${path.root}/../config/config.yaml")
 }
 
 # ── CloudWatch log groups ─────────────────────────────────────────────────────
