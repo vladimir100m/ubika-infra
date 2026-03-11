@@ -1,9 +1,18 @@
 echo "hello from .prebuild.sh in litellm/infra"
 echo "This script can be used to perform any necessary setup or checks before the Terraform plan/apply steps run for this layer."
 
-source .env
-if [[ (-z "$LITELLM_VERSION") || ("$LITELLM_VERSION" == "placeholder") ]]; then
-    echo "LITELLM_VERSION must be set in .env file"
+if [[ -f .env ]]; then
+    set -a
+    source .env
+    set +a
+else
+    echo ".env not found, using workflow environment/defaults"
+fi
+
+LITELLM_VERSION="${LITELLM_VERSION:-${TF_VAR_litellm_version:-latest}}"
+
+if [[ "$LITELLM_VERSION" == "placeholder" ]]; then
+    echo "LITELLM_VERSION must be set via .env, TF_VAR_litellm_version, or environment variables"
     exit 1
 fi
 
