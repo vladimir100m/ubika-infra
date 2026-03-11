@@ -33,3 +33,15 @@ variable "manage_github_actions_role_policy" {
   type        = bool
   default     = false
 }
+
+variable "environment" {
+  description = "Deployment environment name (e.g. production, staging). Used in resource tags and naming."
+  type        = string
+  default     = "production"
+}
+
+variable "github_actions_role_name" {
+  description = "Name of the manually-created IAM role used by GitHub Actions OIDC."
+  type        = string
+  default     = "GitHubActionDeployRole"
+}

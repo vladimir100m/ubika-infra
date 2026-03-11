@@ -20,7 +20,7 @@ provider "aws" {
     tags = {
       project     = "ubika-infra"
       managed_by  = "terraform"
-      environment = "production"
+      environment = var.environment
     }
   }
 }
