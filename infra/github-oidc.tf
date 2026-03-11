@@ -8,6 +8,8 @@
 # ---------------------------------------------------------------------------
 
 resource "aws_iam_role_policy" "github_actions_deploy" {
+  count = var.manage_github_actions_role_policy ? 1 : 0
+
   name = "ubika-infra-deploy-policy"
   role = "GitHubActionDeployRole"
 
