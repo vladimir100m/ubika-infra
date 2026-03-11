@@ -4,16 +4,23 @@ on:
   push:
     branches: ["main"]
     paths:
-      - infra/**
+      - live/**
+      - modules/**
       - .github/workflows/deploy.yml
-      - infra/build.sh
+      - scripts/deploy.sh
   pull_request:
     branches: ["main"]
     paths:
-      - infra/**
+      - live/**
+      - modules/**
       - .github/workflows/deploy.yml
-      - infra/build.sh
+      - scripts/deploy.sh
   workflow_dispatch:
+    inputs:
+      layer:
+        description: "Layer to deploy (e.g. _global, production/networking). Leave empty to auto-detect all."
+        required: false
+        default: ""
 
 permissions:
   id-token: write
@@ -28,7 +35,7 @@ concurrency:
 
 jobs:
   changes:
-    name: Detect changed infra layers
+    name: Detect changed layers
     runs-on: ubuntu-latest
     outputs:
       layers: ${{ steps.detect.outputs.layers }}
@@ -44,6 +51,12 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Manual dispatch with an explicit layer overrides auto-detection.
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.layer }}" ]]; then
+            echo "layers=[\"${{ inputs.layer }}\"]" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             BASE_SHA="${{ github.event.pull_request.base.sha }}"
             HEAD_SHA="${{ github.sha }}"
@@ -52,11 +65,11 @@ jobs:
             HEAD_SHA="${{ github.sha }}"
           fi
 
-          layers_json="$(bash infra/build.sh detect-layers "${BASE_SHA}" "${HEAD_SHA}")"
+          layers_json="$(bash scripts/deploy.sh detect-layers "${BASE_SHA}" "${HEAD_SHA}")"
           echo "layers=${layers_json}" >> "$GITHUB_OUTPUT"
 
   deploy:
-    name: Terraform Deploy
+    name: "[${{ matrix.layer }}] Terraform"
     needs: changes
     if: ${{ needs.changes.outputs.layers != '[]' }}
     runs-on: ubuntu-latest
@@ -79,8 +92,8 @@ jobs:
         uses: hashicorp/setup-terraform@v3
 
       - name: Terraform Plan
-        run: bash infra/build.sh terraform-plan "${{ matrix.layer }}"
+        run: bash scripts/deploy.sh terraform-plan "${{ matrix.layer }}"
 
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: bash infra/build.sh terraform-apply "${{ matrix.layer }}"
+        run: bash scripts/deploy.sh terraform-apply "${{ matrix.layer }}"

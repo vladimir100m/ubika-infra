@@ -3,8 +3,10 @@
 #
 # Attaches an inline policy to the manually-created GitHubActionDeployRole
 # granting exactly the permissions needed to deploy this Terraform stack.
-# The role already exists, so we can reference it by name directly and avoid
-# an IAM read during planning.
+# The role already exists, so we reference it by name directly.
+#
+# This resource is opt-in (manage_github_actions_role_policy = false by
+# default) to avoid the deploy role trying to modify itself during normal runs.
 # ---------------------------------------------------------------------------
 
 resource "aws_iam_role_policy" "github_actions_deploy" {
@@ -37,12 +39,10 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
       {
         Sid    = "EC2VPC"
         Effect = "Allow"
-        Action = [
-          "ec2:*",
-        ]
+        Action = ["ec2:*"]
         Resource = "*"
       },
-      # ── IAM – scoped to roles/policies this stack creates ──────────────
+      # ── IAM – scoped to roles this stack creates ────────────────────────
       {
         Sid    = "IAMScopedToStack"
         Effect = "Allow"
@@ -53,7 +53,6 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
           "iam:ListRolePolicies",
           "iam:ListAttachedRolePolicies",
           "iam:ListInstanceProfilesForRole",
-          "iam:PassRole",
           "iam:AttachRolePolicy",
           "iam:DetachRolePolicy",
           "iam:PutRolePolicy",
@@ -63,7 +62,24 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
           "iam:UntagRole",
           "iam:UpdateAssumeRolePolicy",
         ]
-        Resource = "arn:aws:iam::*:role/${var.name}-*"
+        Resource = [
+          "arn:aws:iam::703544859494:role/cdk-*",
+          "arn:aws:iam::703544859494:role/genai-gateway-*",
+        ]
+      },
+      # ── iam:PassRole – scoped to VPC Flow Logs only ─────────────────────
+      {
+        Sid    = "IAMPassRoleToVPCFlowLogs"
+        Effect = "Allow"
+        Action = ["iam:PassRole"]
+        Resource = [
+          "arn:aws:iam::703544859494:role/genai-gateway-*",
+        ]
+        Condition = {
+          StringEquals = {
+            "iam:PassedToService" = "vpc-flow-logs.amazonaws.com"
+          }
+        }
       },
       # ── CloudWatch Logs ────────────────────────────────────────────────
       {
@@ -85,11 +101,9 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
       },
       # ── Route 53 ───────────────────────────────────────────────────────
       {
-        Sid    = "Route53"
-        Effect = "Allow"
-        Action = [
-          "route53:*",
-        ]
+        Sid      = "Route53"
+        Effect   = "Allow"
+        Action   = ["route53:*"]
         Resource = "*"
       },
     ]

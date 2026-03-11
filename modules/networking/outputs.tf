@@ -1,12 +1,8 @@
-#############################################
-# OUTPUTS
-#############################################
 output "VpcId" {
   description = "The ID of the VPC"
   value       = local.final_vpc_id
 }
 
-# If we created the pull-through cache:
 output "private_subnet_ids" {
   description = "List of IDs of private subnets"
   value       = local.creating_new_vpc ? local.new_private_subnet_ids : local.existing_private_subnet_ids

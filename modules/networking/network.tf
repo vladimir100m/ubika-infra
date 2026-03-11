@@ -3,7 +3,6 @@ data "aws_vpc" "existing" {
   id    = var.vpc_id
 }
 
-# We'll expose a local reference to either the existing VPC or a newly created one:
 resource "aws_vpc" "new" {
   count                = local.creating_new_vpc ? 1 : 0
   cidr_block           = "10.0.0.0/16"
@@ -11,14 +10,11 @@ resource "aws_vpc" "new" {
   enable_dns_support   = true
 }
 
-# We create an Internet Gateway only if we're creating the new VPC
 resource "aws_internet_gateway" "this" {
   count  = local.creating_new_vpc ? 1 : 0
   vpc_id = aws_vpc.new[0].id
 }
 
-# Create the NAT gateway only if nat_gateway_count = 1 (and we have a new VPC).
-# We'll put it in the first public subnet for simplicity.
 resource "aws_eip" "nat" {
   count  = (local.creating_new_vpc && local.nat_gateway_count == 1) ? 1 : 0
   domain = "vpc"
@@ -47,7 +43,6 @@ resource "aws_subnet" "private" {
   map_public_ip_on_launch = false
 }
 
-# Route tables: one for public subnets, one for private/isolated subnets.
 resource "aws_route_table" "public" {
   count  = local.creating_new_vpc ? 1 : 0
   vpc_id = aws_vpc.new[0].id
@@ -70,7 +65,6 @@ resource "aws_route_table" "private_with_nat" {
   }
 }
 
-# Route table for isolated private subnets (no routes)
 resource "aws_route_table" "private_isolated" {
   count  = local.creating_new_vpc && (local.nat_gateway_count == 0) ? 1 : 0
   vpc_id = aws_vpc.new[0].id
@@ -79,7 +73,6 @@ resource "aws_route_table" "private_isolated" {
   }
 }
 
-# Subnet associations
 resource "aws_route_table_association" "public" {
   count          = local.creating_new_vpc ? length(aws_subnet.public) : 0
   subnet_id      = aws_subnet.public[count.index].id
@@ -92,10 +85,8 @@ resource "aws_route_table_association" "private" {
   route_table_id = local.nat_gateway_count == 1 ? aws_route_table.private_with_nat[0].id : aws_route_table.private_isolated[0].id
 }
 
-# Data source for availability_zones
 data "aws_availability_zones" "available" {
   state = "available"
-  # We only need 2 for the new VPC, but we’ll still retrieve them all, just using index=0,1
 }
 
 resource "aws_cloudwatch_log_group" "vpc_flow_logs" {
