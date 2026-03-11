@@ -28,6 +28,9 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
+  # JSON array of layer paths (relative to live/) that must be excluded from deploy matrix.
+  # Example: ["production/litellm/bootstrap"]
+  DEPLOY_EXCLUDE_LAYERS: '["production/litellm/bootstrap"]'
 
 concurrency:
   group: terraform-infra-${{ github.ref }}
@@ -55,7 +58,12 @@ jobs:
 
           # Manual dispatch with an explicit layer overrides auto-detection.
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.layer }}" ]]; then
-            echo "layers=[\"${{ inputs.layer }}\"]" >> "$GITHUB_OUTPUT"
+            layers_json="[\"${{ inputs.layer }}\"]"
+            filtered_layers_json="$(jq -c --argjson exclude '${{ env.DEPLOY_EXCLUDE_LAYERS }}' '
+              map(select((. as $layer | ($exclude | index($layer))) | not))
+            ' <<< "$layers_json")"
+
+            echo "layers=${filtered_layers_json}" >> "$GITHUB_OUTPUT"
             echo "base_sha=" >> "$GITHUB_OUTPUT"
             echo "head_sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
             exit 0
@@ -70,7 +78,11 @@ jobs:
           fi
 
           layers_json="$(bash scripts/deploy.sh detect-layers "${BASE_SHA}" "${HEAD_SHA}")"
-          echo "layers=${layers_json}" >> "$GITHUB_OUTPUT"
+          filtered_layers_json="$(jq -c --argjson exclude '${{ env.DEPLOY_EXCLUDE_LAYERS }}' '
+            map(select((. as $layer | ($exclude | index($layer))) | not))
+          ' <<< "$layers_json")"
+
+          echo "layers=${filtered_layers_json}" >> "$GITHUB_OUTPUT"
           echo "base_sha=${BASE_SHA}" >> "$GITHUB_OUTPUT"
           echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
 
