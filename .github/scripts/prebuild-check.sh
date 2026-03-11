@@ -1,29 +1,54 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: .github/scripts/prebuild-check.sh <layer>
+# Usage: .github/scripts/prebuild-check.sh <layer_dir> [base_sha] [head_sha]
 #
-# 1. Checks if .prebuild.sh exists in the layer directory and runs it if present.
+# 1. Walks from the layer directory up to live/ and executes any `.prebuild.sh`
+#    files it finds, starting from the highest matching parent.
 # 2. Checks if any Terraform files (*.tf) changed in the layer and sets a flag.
 #
 # Outputs:
 #   - "TF_CHANGED=1" if any .tf file changed, else "TF_CHANGED=0"
 
 LAYER_DIR="$1"
+BASE_SHA="${2:-}"
+HEAD_SHA="${3:-}"
 
-cd "$LAYER_DIR"
+run_prebuild_scripts() {
+  local current_dir="$LAYER_DIR"
+  local -a script_dirs=()
 
-if [[ -f .prebuild.sh ]]; then
-  echo "Found .prebuild.sh in $LAYER_DIR, executing..."
-  chmod +x .prebuild.sh
-  ./\.prebuild.sh
-else
-  echo "No .prebuild.sh found in $LAYER_DIR."
-fi
+  while [[ "$current_dir" != "." && -n "$current_dir" ]]; do
+    if [[ -f "$current_dir/.prebuild.sh" ]]; then
+      script_dirs+=("$current_dir")
+    fi
 
-# Check for changed Terraform files (relative to main branch)
+    [[ "$current_dir" == "live" ]] && break
+    current_dir="${current_dir%/*}"
+  done
+
+  if [[ ${#script_dirs[@]} -eq 0 ]]; then
+    echo "No .prebuild.sh found for $LAYER_DIR."
+    return
+  fi
+
+  for (( index=${#script_dirs[@]} - 1; index>=0; index-- )); do
+    local script_dir="${script_dirs[$index]}"
+    echo "Found .prebuild.sh in $script_dir, executing..."
+    (
+      cd "$script_dir"
+      chmod +x .prebuild.sh
+      ./.prebuild.sh
+    )
+  done
+}
+
+run_prebuild_scripts
+
 TF_CHANGED=0
-if git diff --name-only origin/main...HEAD | grep -E '\.tf$' | grep -q "^$LAYER_DIR/"; then
+if [[ -z "$BASE_SHA" || -z "$HEAD_SHA" ]]; then
+  TF_CHANGED=1
+elif git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -E "^${LAYER_DIR}/.*\.tf$" >/dev/null; then
   TF_CHANGED=1
 fi
 

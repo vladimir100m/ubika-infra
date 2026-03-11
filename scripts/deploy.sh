@@ -65,7 +65,21 @@ detect_layers() {
       fi
       check="${check%/*}"
     done
-    [[ -n "$found_layer" ]] && layers+=("$found_layer")
+
+    if [[ -n "$found_layer" ]]; then
+      layers+=("$found_layer")
+      continue
+    fi
+
+    while [[ "$dir" != "." && -n "$dir" ]]; do
+      while IFS= read -r descendant_provider; do
+        [[ -z "$descendant_provider" ]] && continue
+        layers+=("${descendant_provider#live/}")
+      done < <(find "$dir" -name providers.tf -exec dirname {} \; 2>/dev/null | sort -u)
+
+      [[ "$dir" == "live" ]] && break
+      dir="${dir%/*}"
+    done
   done <<< "$changed_files"
 
   printf '%s\n' "${layers[@]}" | awk 'NF' | sort -u | jq -R -s -c 'split("\n") | map(select(length>0))'

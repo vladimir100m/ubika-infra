@@ -39,6 +39,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       layers: ${{ steps.detect.outputs.layers }}
+      base_sha: ${{ steps.detect.outputs.base_sha }}
+      head_sha: ${{ steps.detect.outputs.head_sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -54,6 +56,8 @@ jobs:
           # Manual dispatch with an explicit layer overrides auto-detection.
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.layer }}" ]]; then
             echo "layers=[\"${{ inputs.layer }}\"]" >> "$GITHUB_OUTPUT"
+            echo "base_sha=" >> "$GITHUB_OUTPUT"
+            echo "head_sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -67,6 +71,8 @@ jobs:
 
           layers_json="$(bash scripts/deploy.sh detect-layers "${BASE_SHA}" "${HEAD_SHA}")"
           echo "layers=${layers_json}" >> "$GITHUB_OUTPUT"
+          echo "base_sha=${BASE_SHA}" >> "$GITHUB_OUTPUT"
+          echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
 
   deploy:
     name: "[${{ matrix.layer }}] Terraform"
@@ -86,7 +92,10 @@ jobs:
         id: prebuild
         shell: bash
         run: |
-          bash .github/scripts/prebuild-check.sh "$(bash scripts/deploy.sh resolve-dir '${{ matrix.layer }}')" > prebuild_output.txt
+          bash .github/scripts/prebuild-check.sh \
+            "$(bash scripts/deploy.sh resolve-dir '${{ matrix.layer }}')" \
+            "${{ needs.changes.outputs.base_sha }}" \
+            "${{ needs.changes.outputs.head_sha }}" > prebuild_output.txt
           cat prebuild_output.txt
           TF_CHANGED=$(grep TF_CHANGED prebuild_output.txt | cut -d'=' -f2)
           echo "tf_changed=$TF_CHANGED" >> "$GITHUB_OUTPUT"
