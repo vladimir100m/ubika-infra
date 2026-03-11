@@ -27,3 +27,9 @@ variable "disable_outbound_network_access" {
   type        = bool
   default     = false
 }
+
+variable "manage_github_actions_role_policy" {
+  description = "Whether Terraform should manage the inline policy on the manually-created GitHubActionDeployRole. Keep false for normal CI/CD runs; enable only for one-time bootstrap updates."
+  type        = bool
+  default     = false
+}
