@@ -45,13 +45,17 @@ resource "aws_wafv2_web_acl" "this" {
         # LLM API clients often omit User-Agent — count instead of block.
         rule_action_override {
           name = "NoUserAgent_HEADER"
-          action_to_use { count {} }
+          action_to_use {
+            count {}
+          }
         }
 
         # LLM request/response bodies can be very large — count instead of block.
         rule_action_override {
           name = "SizeRestrictions_BODY"
-          action_to_use { count {} }
+          action_to_use {
+            count {}
+          }
         }
       }
     }

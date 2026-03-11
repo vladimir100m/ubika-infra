@@ -12,11 +12,17 @@
 # State: production/litellm/bootstrap/terraform.tfstate
 ###############################################################################
 
+data "aws_caller_identity" "current" {}
+
+locals {
+  aws_account_id = data.aws_caller_identity.current.account_id
+}
+
 module "alb_log_bucket" {
   source = "../../../../modules/s3-private"
 
   name          = "${var.name}-litellm-alb-logs-${local.aws_account_id}"
-  bucket_prefix = "${var.name}-litellm-alb-logs-"
+  bucket_name   = "${var.name}-litellm-alb-logs-${local.aws_account_id}"
   force_destroy = false
 
   # Retain logs for 90 days by default
@@ -24,5 +30,5 @@ module "alb_log_bucket" {
 
   # Allow the ELB service principal to write access logs
   enable_alb_log_delivery = true
-  aws_account_id          = var.aws_account_id
+  aws_account_id          = local.aws_account_id
 }

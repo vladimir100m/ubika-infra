@@ -164,7 +164,7 @@ resource "aws_lb_listener" "https" {
 
 # ── WAF association ──────────────────────────────────────────────────────────
 resource "aws_wafv2_web_acl_association" "this" {
-  count        = var.waf_arn != "" ? 1 : 0
+  count        = var.enable_waf_association ? 1 : 0
   resource_arn = aws_lb.this.arn
   web_acl_arn  = var.waf_arn
 }

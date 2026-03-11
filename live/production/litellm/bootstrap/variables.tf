@@ -16,12 +16,6 @@ variable "name" {
   default     = "genai-gateway"
 }
 
-variable "aws_account_id" {
-  description = "AWS account ID — used to scope the ALB log delivery bucket policy."
-  type        = string
-  default     = "703544859494"
-}
-
 variable "log_retention_days" {
   description = "Number of days to retain ALB access logs in S3. Set to 0 to disable lifecycle rule."
   type        = number

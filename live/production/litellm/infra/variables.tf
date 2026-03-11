@@ -25,17 +25,25 @@ variable "aws_account_id" {
   default     = "703544859494"
 }
 
+variable "read_bootstrap_remote_state" {
+  description = "Whether to read the bootstrap remote state for ALB access-log bucket integration. Set true after bootstrap layer is applied."
+  type        = bool
+  default     = false
+}
+
 ################################################################################
 # ECR
 ################################################################################
 variable "ecr_litellm_repository" {
   description = "Name of the ECR repository containing the LiteLLM image."
   type        = string
+  default     = "litellm"
 }
 
 variable "ecr_middleware_repository" {
   description = "Name of the ECR repository containing the Middleware image."
   type        = string
+  default     = "middleware"
 }
 
 variable "litellm_version" {

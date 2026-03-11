@@ -37,6 +37,12 @@ variable "waf_arn" {
   default     = ""
 }
 
+variable "enable_waf_association" {
+  description = "Whether to create WAF association for this ALB. Keep this boolean static at plan time."
+  type        = bool
+  default     = false
+}
+
 variable "log_bucket_name" {
   description = "Name of the S3 bucket to which ALB access logs will be delivered. Leave empty to disable."
   type        = string

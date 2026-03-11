@@ -50,6 +50,8 @@ data "terraform_remote_state" "networking" {
 }
 
 data "terraform_remote_state" "bootstrap" {
+  count = var.read_bootstrap_remote_state ? 1 : 0
+
   backend = "s3"
   config = {
     bucket = "terraform-ubika-703544859494"
@@ -68,6 +70,17 @@ data "aws_ecr_repository" "middleware" {
   name = var.ecr_middleware_repository
 }
 
+locals {
+  # Backward-compatible remote-state key support.
+  networking_vpc_id = try(
+    data.terraform_remote_state.networking.outputs.vpc_id,
+    data.terraform_remote_state.networking.outputs.VpcId,
+  )
+
+  log_bucket_name = var.read_bootstrap_remote_state ? try(data.terraform_remote_state.bootstrap[0].outputs.log_bucket_name, "") : ""
+  log_bucket_arn  = var.read_bootstrap_remote_state ? try(data.terraform_remote_state.bootstrap[0].outputs.log_bucket_arn, "") : ""
+}
+
 # ── Generic modules ──────────────────────────────────────────────────────────
 
 module "waf" {
@@ -80,7 +93,7 @@ module "rds" {
   source = "../../../../modules/rds-postgres"
 
   name       = "${var.name}-litellm"
-  vpc_id     = data.terraform_remote_state.networking.outputs.vpc_id
+  vpc_id     = local.networking_vpc_id
   subnet_ids = data.terraform_remote_state.networking.outputs.private_subnet_ids
 
   db_name                      = "litellm"
@@ -91,28 +104,29 @@ module "rds" {
   performance_insights_enabled = var.rds_performance_insights_enabled
   monitoring_interval          = var.rds_monitoring_interval
 
-  # ECS task SG added after creation via security_group_rule below
-  allowed_security_group_ids = [aws_security_group.ecs_task.id]
+  # SG rules are attached in this root module after both SGs exist.
+  allowed_security_group_ids = []
 }
 
 module "redis" {
   source = "../../../../modules/elasticache-redis"
 
   name       = "${var.name}-litellm"
-  vpc_id     = data.terraform_remote_state.networking.outputs.vpc_id
+  vpc_id     = local.networking_vpc_id
   subnet_ids = data.terraform_remote_state.networking.outputs.private_subnet_ids
 
   node_type          = var.redis_node_type
   num_cache_clusters = var.redis_num_cache_clusters
 
-  allowed_security_group_ids = [aws_security_group.ecs_task.id]
+  # SG rules are attached in this root module after both SGs exist.
+  allowed_security_group_ids = []
 }
 
 module "config_bucket" {
   source = "../../../../modules/s3-private"
 
-  name         = "${var.name}-litellm-config"
-  bucket_name  = "${var.name}-litellm-config-${local.aws_account_id}"
+  name          = "${var.name}-litellm-config"
+  bucket_name   = "${var.name}-litellm-config-${local.aws_account_id}"
   force_destroy = true
 }
 
@@ -128,8 +142,8 @@ module "iam" {
     aws_secretsmanager_secret.llm_api_keys.arn,
   ]
 
-  # Task role gets an inline policy (see below) — no managed ARNs needed
-  task_role_policy_arns = [aws_iam_policy.task_role.arn]
+  # Attachments are created in root to avoid for_each unknown issues at plan time.
+  task_role_policy_arns = []
 }
 
 module "cluster" {
@@ -140,14 +154,15 @@ module "cluster" {
 module "alb" {
   source = "../../../../modules/alb"
 
-  name    = "${var.name}-litellm"
-  vpc_id  = data.terraform_remote_state.networking.outputs.vpc_id
-  subnets = var.public_load_balancer ? data.terraform_remote_state.networking.outputs.public_subnet_ids : data.terraform_remote_state.networking.outputs.private_subnet_ids
+  name       = "${var.name}-litellm"
+  vpc_id     = local.networking_vpc_id
+  subnet_ids = var.public_load_balancer ? data.terraform_remote_state.networking.outputs.public_subnet_ids : data.terraform_remote_state.networking.outputs.private_subnet_ids
 
-  internal        = !var.public_load_balancer
-  certificate_arn = var.certificate_arn
-  waf_arn         = module.waf.web_acl_arn
-  log_bucket_name = data.terraform_remote_state.bootstrap.outputs.log_bucket_name
+  internal               = !var.public_load_balancer
+  certificate_arn        = var.certificate_arn
+  waf_arn                = module.waf.web_acl_arn
+  enable_waf_association = true
+  log_bucket_name        = local.log_bucket_name
 
   target_groups = {
     litellm = {
@@ -270,7 +285,7 @@ resource "aws_cloudwatch_log_group" "middleware" {
 resource "aws_security_group" "ecs_task" {
   name        = "${var.name}-litellm-task-sg"
   description = "Security group for LiteLLM ECS Fargate tasks"
-  vpc_id      = data.terraform_remote_state.networking.outputs.vpc_id
+  vpc_id      = local.networking_vpc_id
 
   egress {
     description = "Allow all outbound"
@@ -292,7 +307,7 @@ resource "aws_security_group_rule" "ecs_task_ingress_4000" {
   protocol                 = "tcp"
   security_group_id        = aws_security_group.ecs_task.id
   source_security_group_id = module.alb.alb_security_group_id
-  description              = "Allow ALB → LiteLLM container"
+  description              = "Allow ALB to LiteLLM container"
 }
 
 resource "aws_security_group_rule" "ecs_task_ingress_3000" {
@@ -302,7 +317,27 @@ resource "aws_security_group_rule" "ecs_task_ingress_3000" {
   protocol                 = "tcp"
   security_group_id        = aws_security_group.ecs_task.id
   source_security_group_id = module.alb.alb_security_group_id
-  description              = "Allow ALB → Middleware container"
+  description              = "Allow ALB to Middleware container"
+}
+
+resource "aws_security_group_rule" "redis_ingress_from_ecs" {
+  type                     = "ingress"
+  from_port                = 6379
+  to_port                  = 6379
+  protocol                 = "tcp"
+  security_group_id        = module.redis.security_group_id
+  source_security_group_id = aws_security_group.ecs_task.id
+  description              = "Allow ECS tasks to Redis"
+}
+
+resource "aws_security_group_rule" "rds_ingress_from_ecs" {
+  type                     = "ingress"
+  from_port                = 5432
+  to_port                  = 5432
+  protocol                 = "tcp"
+  security_group_id        = module.rds.security_group_id
+  source_security_group_id = aws_security_group.ecs_task.id
+  description              = "Allow ECS tasks to RDS"
 }
 
 # ── IAM: Task Role inline policy ─────────────────────────────────────────────
@@ -317,13 +352,16 @@ data "aws_iam_policy_document" "task_role" {
     ]
   }
 
-  statement {
-    sid     = "S3LogBucket"
-    actions = ["s3:*"]
-    resources = [
-      data.terraform_remote_state.bootstrap.outputs.log_bucket_arn,
-      "${data.terraform_remote_state.bootstrap.outputs.log_bucket_arn}/*",
-    ]
+  dynamic "statement" {
+    for_each = local.log_bucket_arn != "" ? [1] : []
+    content {
+      sid     = "S3LogBucket"
+      actions = ["s3:*"]
+      resources = [
+        local.log_bucket_arn,
+        "${local.log_bucket_arn}/*",
+      ]
+    }
   }
 
   statement {
@@ -342,6 +380,11 @@ data "aws_iam_policy_document" "task_role" {
 resource "aws_iam_policy" "task_role" {
   name   = "${var.name}-litellm-task-policy"
   policy = data.aws_iam_policy_document.task_role.json
+}
+
+resource "aws_iam_role_policy_attachment" "task_role_custom" {
+  role       = module.iam.task_role_name
+  policy_arn = aws_iam_policy.task_role.arn
 }
 
 # ── Container definitions (LiteLLM + Middleware) ──────────────────────────────
@@ -462,10 +505,10 @@ locals {
 module "service" {
   source = "../../../../modules/ecs-service"
 
-  name    = "${var.name}-litellm"
+  name        = "${var.name}-litellm"
   cluster_arn = module.cluster.cluster_arn
 
-  vpc_id             = data.terraform_remote_state.networking.outputs.vpc_id
+  vpc_id             = local.networking_vpc_id
   private_subnet_ids = data.terraform_remote_state.networking.outputs.private_subnet_ids
   security_group_ids = [aws_security_group.ecs_task.id]
 
@@ -517,15 +560,15 @@ locals {
 
   # Paths routed to the Middleware container (port 3000)
   middleware_rules = {
-    bedrock_models    = { priority = 16, paths = ["/bedrock/model/*"], methods = ["POST", "GET", "PUT"] }
-    openai_completions = { priority = 15, paths = ["/v1/chat/completions"], methods = ["POST", "GET", "PUT"] }
-    chat_completions  = { priority = 14, paths = ["/chat/completions"], methods = ["POST", "GET", "PUT"] }
-    user_new          = { priority = 13, paths = ["/user/new"], methods = ["POST", "GET", "PUT"] }
-    key_generate      = { priority = 12, paths = ["/key/generate"], methods = ["POST", "GET", "PUT"] }
-    session_ids       = { priority = 11, paths = ["/session-ids"], methods = ["POST", "GET", "PUT"] }
-    bedrock_liveliness = { priority = 10, paths = ["/bedrock/health/liveliness"], methods = ["POST", "GET", "PUT"] }
+    bedrock_models       = { priority = 16, paths = ["/bedrock/model/*"], methods = ["POST", "GET", "PUT"] }
+    openai_completions   = { priority = 15, paths = ["/v1/chat/completions"], methods = ["POST", "GET", "PUT"] }
+    chat_completions     = { priority = 14, paths = ["/chat/completions"], methods = ["POST", "GET", "PUT"] }
+    user_new             = { priority = 13, paths = ["/user/new"], methods = ["POST", "GET", "PUT"] }
+    key_generate         = { priority = 12, paths = ["/key/generate"], methods = ["POST", "GET", "PUT"] }
+    session_ids          = { priority = 11, paths = ["/session-ids"], methods = ["POST", "GET", "PUT"] }
+    bedrock_liveliness   = { priority = 10, paths = ["/bedrock/health/liveliness"], methods = ["POST", "GET", "PUT"] }
     bedrock_chat_history = { priority = 9, paths = ["/bedrock/chat-history"], methods = ["POST", "GET", "PUT"] }
-    chat_history      = { priority = 8, paths = ["/chat-history"], methods = ["POST", "GET", "PUT"] }
+    chat_history         = { priority = 8, paths = ["/chat-history"], methods = ["POST", "GET", "PUT"] }
   }
 }
 
