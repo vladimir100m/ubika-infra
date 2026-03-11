@@ -1,12 +1,34 @@
-# ---------------------------------------------------------------------------
-# Module: ecs-cluster
+###############################################################################
+# modules/ecs-cluster
 #
-# Provisions a shared ECS cluster with capacity providers.
-# Intended to be instantiated once per environment under live/<env>/clusters/.
-# ---------------------------------------------------------------------------
+# Provisions a shared ECS Fargate cluster.
+# - Container Insights enabled
+# - FARGATE and FARGATE_SPOT capacity providers
+#
+# Reusable for: any environment that runs Fargate workloads.
+###############################################################################
 
-# Placeholder – implement when adding ECS workloads.
-# Expected resources:
-#   - aws_ecs_cluster
-#   - aws_ecs_cluster_capacity_providers
-#   - aws_cloudwatch_log_group (cluster-level logging)
+resource "aws_ecs_cluster" "this" {
+  name = "${var.name}-cluster"
+
+  setting {
+    name  = "containerInsights"
+    value = "enabled"
+  }
+
+  tags = {
+    Name = "${var.name}-cluster"
+  }
+}
+
+resource "aws_ecs_cluster_capacity_providers" "this" {
+  cluster_name = aws_ecs_cluster.this.name
+
+  capacity_providers = ["FARGATE", "FARGATE_SPOT"]
+
+  default_capacity_provider_strategy {
+    capacity_provider = "FARGATE"
+    weight            = 1
+    base              = 1
+  }
+}

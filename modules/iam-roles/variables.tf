@@ -10,7 +10,13 @@ variable "task_role_policy_arns" {
 }
 
 variable "extra_execution_role_policy_arns" {
-  description = "Additional policy ARNs to attach to the Task Execution Role beyond the AWS managed baseline."
+  description = "Additional managed policy ARNs to attach to the Task Execution Role beyond the AWS baseline."
+  type        = list(string)
+  default     = []
+}
+
+variable "extra_secrets_arns" {
+  description = "List of Secrets Manager ARNs the Task Execution Role must be able to read at container start-up."
   type        = list(string)
   default     = []
 }
