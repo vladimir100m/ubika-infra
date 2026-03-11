@@ -10,12 +10,12 @@ variable "vpc_id" {
 }
 
 variable "disable_outbound_network_access" {
-    description = "Whether to disable outbound network access"
-    type = bool
+  description = "Whether to disable outbound network access"
+  type        = bool
 }
 
 variable "create_vpc_endpoints_in_existing_vpc" {
-  type    = bool
+  type        = bool
   description = "If using an existing VPC, set this to true to also create interface/gateway endpoints within it."
 }
 

@@ -2,11 +2,11 @@
 # Adding guidance solution ID via AWS CloudFormation resource
 #--------------------------------------------------------------
 module "base" {
-  source = "../infra/base"
-  name = var.name
-  vpc_id = var.vpc_id
+  source                               = "../infra/base"
+  name                                 = var.name
+  vpc_id                               = var.vpc_id
   create_vpc_endpoints_in_existing_vpc = var.create_vpc_endpoints_in_existing_vpc
-  disable_outbound_network_access = var.disable_outbound_network_access
+  disable_outbound_network_access      = var.disable_outbound_network_access
 }
 
 data "aws_subnets" "private" {
