@@ -63,3 +63,4 @@ fi
 
 echo "TF_CHANGED=$TF_CHANGED"
 echo "FORCE_DEPLOY=$FORCE_DEPLOY"
+echo "ARCH=${ARCH:-x86}"

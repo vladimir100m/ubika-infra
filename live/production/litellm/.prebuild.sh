@@ -106,6 +106,7 @@ echo "Preparing LiteLLM image build"
 echo "APP_NAME=${APP_NAME}"
 echo "LITELLM_VERSION=${LITELLM_VERSION}"
 echo "DOCKER_ARCH=${DOCKER_ARCH}"
+echo "ARCH=${ARCH}"
 
 ensure_repository
 prepare_build_context
