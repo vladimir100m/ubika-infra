@@ -3,15 +3,13 @@
 #
 # Attaches an inline policy to the manually-created GitHubActionDeployRole
 # granting exactly the permissions needed to deploy this Terraform stack.
+# The role already exists, so we can reference it by name directly and avoid
+# an IAM read during planning.
 # ---------------------------------------------------------------------------
-
-data "aws_iam_role" "github_actions" {
-  name = "GitHubActionDeployRole"
-}
 
 resource "aws_iam_role_policy" "github_actions_deploy" {
   name = "ubika-infra-deploy-policy"
-  role = data.aws_iam_role.github_actions.id
+  role = "GitHubActionDeployRole"
 
   policy = jsonencode({
     Version = "2012-10-17"
