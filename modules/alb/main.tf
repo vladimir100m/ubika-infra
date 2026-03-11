@@ -1,19 +1,5 @@
 ###############################################################################
 # modules/alb
-#
-# Generic Application Load Balancer.
-# - Internet-facing or internal
-# - HTTP (80) and HTTPS (443) listeners
-# - Self-signed TLS certificate fallback when no ACM cert is provided
-# - Multiple target groups defined by variable (no hard-coded ports)
-# - Optional WAFv2 web ACL association
-# - Optional S3 access log delivery
-# - ALB security group with sensible defaults
-#
-# Listener rules are intentionally NOT created here — they belong to the live
-# layer (or the service module) because rules are workload-specific.
-#
-# Reusable for: any HTTP/HTTPS service behind an ALB.
 ###############################################################################
 
 # ── Security group ───────────────────────────────────────────────────────────
@@ -51,7 +37,7 @@ resource "aws_security_group" "alb" {
   }
 }
 
-# ── Self-signed certificate (fallback when no ACM cert supplied) ─────────────
+# ── Self-signed certificate ──────────────────────────────────────────────────
 resource "tls_private_key" "self_signed" {
   count     = var.certificate_arn == "" ? 1 : 0
   algorithm = "RSA"
@@ -67,13 +53,9 @@ resource "tls_self_signed_cert" "self_signed" {
     organization = var.name
   }
 
-  validity_period_hours = 8760 # 1 year
+  validity_period_hours = 8760 
 
-  allowed_uses = [
-    "key_encipherment",
-    "digital_signature",
-    "server_auth",
-  ]
+  allowed_uses = ["key_encipherment", "digital_signature", "server_auth"]
 }
 
 resource "aws_acm_certificate" "self_signed" {
@@ -96,6 +78,10 @@ resource "aws_lb" "this" {
   idle_timeout       = var.idle_timeout
 
   drop_invalid_header_fields = true
+
+  # FIX: Explicitly depend on the SG to ensure the LB's ENIs are 
+  # fully deleted before the SG/Subnet destruction cycle begins.
+  depends_on = [aws_security_group.alb]
 
   dynamic "access_logs" {
     for_each = var.log_bucket_name != "" ? [1] : []
@@ -121,6 +107,9 @@ resource "aws_lb_target_group" "this" {
   vpc_id      = var.vpc_id
   target_type = "ip"
 
+  # SENIOR TIP: Reduce delay for faster container cycling in dev/staging
+  deregistration_delay = 30 
+
   health_check {
     path                = each.value.health_check_path
     port                = each.value.health_check_port
@@ -136,7 +125,7 @@ resource "aws_lb_target_group" "this" {
   }
 }
 
-# ── HTTP Listener (port 80) ──────────────────────────────────────────────────
+# ── Listeners ────────────────────────────────────────────────────────────────
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.this.arn
   port              = 80
@@ -148,7 +137,6 @@ resource "aws_lb_listener" "http" {
   }
 }
 
-# ── HTTPS Listener (port 443) ────────────────────────────────────────────────
 resource "aws_lb_listener" "https" {
   load_balancer_arn = aws_lb.this.arn
   port              = 443

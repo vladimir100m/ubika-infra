@@ -1,0 +1,8 @@
+      - name: Prebuild & Terraform Check
+        id: prebuild
+        shell: bash
+        run: |
+          bash .github/scripts/prebuild-check.sh "$(bash scripts/deploy.sh resolve-dir '${{ matrix.layer }}')" > prebuild_output.txt
+          cat prebuild_output.txt
+          TF_CHANGED=$(grep TF_CHANGED prebuild_output.txt | cut -d'=' -f2)
+          echo "tf_changed=$TF_CHANGED" >> "$GITHUB_OUTPUT"
