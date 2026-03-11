@@ -58,7 +58,7 @@ variable "litellm_version" {
 variable "rds_instance_class" {
   description = "RDS instance class."
   type        = string
-  default     = "db.t3.medium"
+  default     = "db.t3.micro"
 }
 
 variable "rds_allocated_storage" {

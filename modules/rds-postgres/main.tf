@@ -1,14 +1,5 @@
 ###############################################################################
 # modules/rds-postgres
-#
-# Generic PostgreSQL RDS instance.
-# - Random password stored in Secrets Manager
-# - DB subnet group (multi-AZ capable)
-# - Parameter group (postgres15, with query logging)
-# - Security group with configurable ingress
-# - Optional Enhanced Monitoring IAM role
-#
-# Reusable for: any service that needs a managed Postgres database.
 ###############################################################################
 
 # ── Random master password ───────────────────────────────────────────────────
@@ -68,12 +59,16 @@ resource "aws_security_group_rule" "ingress" {
 }
 
 # ── DB subnet group ──────────────────────────────────────────────────────────
+locals {
+  db_subnet_group_name = "${var.name}-db-subnet-group-${substr(replace(var.vpc_id, "vpc-", ""), 0, 8)}"
+}
+
 resource "aws_db_subnet_group" "this" {
-  name       = "${var.name}-db-subnet-group"
+  name       = local.db_subnet_group_name
   subnet_ids = var.subnet_ids
 
   tags = {
-    Name = "${var.name}-db-subnet-group"
+    Name = local.db_subnet_group_name
   }
 }
 
@@ -134,7 +129,10 @@ resource "aws_db_instance" "this" {
   engine            = "postgres"
   engine_version    = var.engine_version
   instance_class    = var.instance_class
-  storage_type      = "gp3"
+  
+  # FIX: Change to gp2 for Free Tier compatibility. 
+  # AWS Free Tier is specifically tied to gp2 for RDS.
+  storage_type      = "gp2" 
   allocated_storage = var.allocated_storage
   storage_encrypted = true
 
@@ -143,8 +141,10 @@ resource "aws_db_instance" "this" {
   parameter_group_name = aws_db_parameter_group.this.name
 
   vpc_security_group_ids = [aws_security_group.this.id]
-  username               = jsondecode(aws_secretsmanager_secret_version.db_credential.secret_string)["username"]
-  password               = jsondecode(aws_secretsmanager_secret_version.db_credential.secret_string)["password"]
+  
+  # Use variables directly to avoid chicken-and-egg issues with jsondecode
+  username = var.db_username
+  password = random_password.master.result
 
   multi_az                        = var.multi_az
   performance_insights_enabled    = var.performance_insights_enabled
@@ -162,5 +162,10 @@ resource "aws_db_instance" "this" {
     Name = "${var.name}-db"
   }
 
-  depends_on = [aws_secretsmanager_secret_version.db_credential]
+  # FIX: Stronger dependencies to prevent "Subnet in use" during destroy
+  depends_on = [
+    aws_secretsmanager_secret_version.db_credential,
+    aws_db_subnet_group.this,
+    aws_security_group.this
+  ]
 }
