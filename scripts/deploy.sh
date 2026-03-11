@@ -71,6 +71,16 @@ detect_layers() {
   printf '%s\n' "${layers[@]}" | awk 'NF' | sort -u | jq -R -s -c 'split("\n") | map(select(length>0))'
 }
 
+terraform_validate() {
+  local layer="$1"
+  local dir
+  dir="$(resolve_dir "$layer")"
+
+  terraform -chdir="$dir" init -input=false -reconfigure -backend-config=backend.hcl
+  terraform -chdir="$dir" fmt -check -recursive
+  terraform -chdir="$dir" validate
+}
+
 terraform_plan() {
   local layer="$1"
   local dir
@@ -103,6 +113,9 @@ case "$cmd" in
     ;;
   terraform-apply)
     terraform_apply "${2:-}"
+    ;;
+  terraform_validate)
+    terraform_validate "${2:-}"
     ;;
   *)
     echo "Usage: $0 {detect-layers <base_sha> <head_sha>|resolve-dir <layer>|terraform-plan <layer>|terraform-apply <layer>}" >&2
