@@ -1,18 +1,29 @@
-*.swp
-package-lock.json
-__pycache__
-.pytest_cache
-.venv
-*.egg-info
+# ─── Terraform ───────────────────────────────────────────────
+.terraform/
+.terraform.lock.hcl
+*.tfplan
+tfplan
+*.tfstate
+*.tfstate.backup
+terraform.tfvars
+terraform.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+crash.log
+crash.*.log
 
-# CDK asset staging directory
-.cdk.staging
-cdk.out
+# ─── Environment / Secrets ───────────────────────────────────
+.env
+*.env
+*.env.local
 
-# Python
+# ─── Python ──────────────────────────────────────────────────
 *.pyc
 __pycache__/
 .Python
+.venv/
 build/
 develop-eggs/
 dist/
@@ -28,11 +39,22 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+.pytest_cache/
 
-# IDEs
+# ─── CDK ─────────────────────────────────────────────────────
+.cdk.staging/
+cdk.out/
+
+# ─── Node ────────────────────────────────────────────────────
+node_modules/
+package-lock.json
+
+# ─── IDEs ────────────────────────────────────────────────────
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
+
+# ─── macOS ───────────────────────────────────────────────────
 .DS_Store

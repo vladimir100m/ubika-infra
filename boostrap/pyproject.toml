@@ -1,0 +1,30 @@
+[project]
+name = "ubika-infra"
+version = "0.1.0"
+description = "Ubika Infrastructure - AWS CDK for LLM Gateway on AWS"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+    { name = "Vlad", email = "vlad@ubika.com" }
+]
+dependencies = [
+    "aws-cdk-lib>=2.100.0",
+    "constructs>=10.0.0",
+    "python-dotenv>=1.0.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "black>=23.0",
+    "isort>=5.0",
+    "mypy>=1.0",
+    "flake8>=6.0"
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["stacks"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
