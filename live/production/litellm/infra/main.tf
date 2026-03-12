@@ -165,18 +165,22 @@ module "alb" {
   enable_waf_association = true
   log_bucket_name        = local.log_bucket_name
 
-  target_groups = {
-    litellm = {
-      port              = 4000
-      health_check_path = "/health/liveliness"
-      health_check_port = "4000"
-    }
-    middleware = {
-      port              = 3000
-      health_check_path = "/bedrock/health/liveliness"
-      health_check_port = "3000"
-    }
-  }
+  target_groups = merge(
+    {
+      litellm = {
+        port              = 4000
+        health_check_path = "/health/liveliness"
+        health_check_port = "4000"
+      }
+    },
+    var.enable_middleware ? {
+      middleware = {
+        port              = 3000
+        health_check_path = "/bedrock/health/liveliness"
+        health_check_port = "3000"
+      }
+    } : {}
+  )
 
   default_target_group_key = "litellm"
 }
@@ -326,6 +330,7 @@ resource "aws_security_group_rule" "ecs_task_ingress_4000" {
 }
 
 resource "aws_security_group_rule" "ecs_task_ingress_3000" {
+  count                    = var.enable_middleware ? 1 : 0
   type                     = "ingress"
   from_port                = 3000
   to_port                  = 3000
@@ -409,8 +414,7 @@ locals {
   cpu_units        = var.vcpus * 1024
   memory_mib       = var.vcpus * 1024 * 2
 
-  container_definitions = jsonencode([
-    {
+  litellm_container_definition = {
       name      = "LiteLLMContainer"
       image     = "${data.aws_ecr_repository.litellm.repository_url}:${var.litellm_version}"
       essential = true
@@ -478,10 +482,11 @@ locals {
         timeout  = 5
         retries  = 3
       }
-    },
-    {
+    }
+
+  middleware_container_definition = {
       name      = "MiddlewareContainer"
-      image     = "${data.aws_ecr_repository.middleware.repository_url}:latest"
+      image     = "${data.aws_ecr_repository.middleware.repository_url}:${var.middleware_version}"
       essential = true
 
       logConfiguration = {
@@ -512,7 +517,11 @@ locals {
         retries  = 3
       }
     }
-  ])
+
+  container_definitions = jsonencode(concat(
+    [local.litellm_container_definition],
+    var.enable_middleware ? [local.middleware_container_definition] : []
+  ))
 }
 
 # ── ECS service (via module) ──────────────────────────────────────────────────
@@ -542,18 +551,22 @@ module "service" {
   cpu_target_utilization_percent    = var.cpu_target_utilization_percent
   memory_target_utilization_percent = var.memory_target_utilization_percent
 
-  load_balancers = [
-    {
-      target_group_arn = module.alb.target_group_arns["litellm"]
-      container_name   = "LiteLLMContainer"
-      container_port   = 4000
-    },
-    {
-      target_group_arn = module.alb.target_group_arns["middleware"]
-      container_name   = "MiddlewareContainer"
-      container_port   = 3000
-    }
-  ]
+  load_balancers = concat(
+    [
+      {
+        target_group_arn = module.alb.target_group_arns["litellm"]
+        container_name   = "LiteLLMContainer"
+        container_port   = 4000
+      }
+    ],
+    var.enable_middleware ? [
+      {
+        target_group_arn = module.alb.target_group_arns["middleware"]
+        container_name   = "MiddlewareContainer"
+        container_port   = 3000
+      }
+    ] : []
+  )
 
   depends_on = [
     module.rds,
@@ -575,7 +588,7 @@ locals {
   cf_secret = var.use_cloudfront ? "cf-${module.cdn[0].origin_secret}" : ""
 
   # Paths routed to the Middleware container (port 3000)
-  middleware_rules = {
+  middleware_rules = var.enable_middleware ? {
     bedrock_models       = { priority = 16, paths = ["/bedrock/model/*"], methods = ["POST", "GET", "PUT"] }
     openai_completions   = { priority = 15, paths = ["/v1/chat/completions"], methods = ["POST", "GET", "PUT"] }
     chat_completions     = { priority = 14, paths = ["/chat/completions"], methods = ["POST", "GET", "PUT"] }
@@ -585,7 +598,7 @@ locals {
     bedrock_liveliness   = { priority = 10, paths = ["/bedrock/health/liveliness"], methods = ["POST", "GET", "PUT"] }
     bedrock_chat_history = { priority = 9, paths = ["/bedrock/chat-history"], methods = ["POST", "GET", "PUT"] }
     chat_history         = { priority = 8, paths = ["/chat-history"], methods = ["POST", "GET", "PUT"] }
-  }
+  } : {}
 }
 
 # Middleware routing rules (HTTPS)

@@ -10,10 +10,13 @@ else
     echo ".env not found, using workflow environment/defaults"
 fi
 
-APP_NAME="${APP_NAME:-${ECR_LITELLM_REPOSITORY:-litellm}}"
+LITELLM_REPOSITORY="${APP_NAME:-${ECR_LITELLM_REPOSITORY:-litellm}}"
+MIDDLEWARE_REPOSITORY="${ECR_MIDDLEWARE_REPOSITORY:-middleware}"
 BUILD_FROM_SOURCE="$(echo "${BUILD_FROM_SOURCE:-false}" | tr '[:upper:]' '[:lower:]')"
+ENABLE_MIDDLEWARE="$(echo "${ENABLE_MIDDLEWARE:-${TF_VAR_enable_middleware:-false}}" | tr '[:upper:]' '[:lower:]')"
 AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 LITELLM_VERSION="${LITELLM_VERSION:-${TF_VAR_litellm_version:-latest}}"
+MIDDLEWARE_VERSION="${MIDDLEWARE_VERSION:-${TF_VAR_middleware_version:-latest}}"
 CPU_ARCHITECTURE="${CPU_ARCHITECTURE:-}"
 
 if [[ "$LITELLM_VERSION" == "placeholder" ]]; then
@@ -63,18 +66,22 @@ esac
 
 AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query 'Account' --output text)"
 ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-IMAGE_URI="${ECR_REGISTRY}/${APP_NAME}:${LITELLM_VERSION}"
-BUILD_CONTEXT="."
+LITELLM_IMAGE_URI="${ECR_REGISTRY}/${LITELLM_REPOSITORY}:${LITELLM_VERSION}"
+MIDDLEWARE_IMAGE_URI="${ECR_REGISTRY}/${MIDDLEWARE_REPOSITORY}:${MIDDLEWARE_VERSION}"
+LITELLM_BUILD_CONTEXT="."
+MIDDLEWARE_BUILD_CONTEXT="middleware"
 
 ensure_repository() {
-    if aws ecr describe-repositories --repository-names "$APP_NAME" >/dev/null 2>&1; then
-        echo "Repository $APP_NAME already exists"
+    local repository_name="$1"
+
+    if aws ecr describe-repositories --repository-names "$repository_name" >/dev/null 2>&1; then
+        echo "Repository $repository_name already exists"
         return
     fi
 
-    echo "Creating ECR repository $APP_NAME"
+    echo "Creating ECR repository $repository_name"
     aws ecr create-repository \
-        --repository-name "$APP_NAME" \
+        --repository-name "$repository_name" \
         --tags Key=project,Value=ubika-infra Key=workload,Value=litellm >/dev/null
 }
 
@@ -88,27 +95,60 @@ prepare_build_context() {
     mkdir -p litellm-source
     curl -fsSL "https://github.com/BerriAI/litellm/archive/refs/tags/${LITELLM_VERSION}.tar.gz" \
         | tar -xz -C litellm-source --strip-components=1
-    BUILD_CONTEXT="litellm-source"
+    LITELLM_BUILD_CONTEXT="litellm-source"
 }
 
 publish_environment() {
     if [[ -n "${GITHUB_ENV:-}" ]]; then
         {
             echo "LITELLM_VERSION=${LITELLM_VERSION}"
+            echo "MIDDLEWARE_VERSION=${MIDDLEWARE_VERSION}"
             echo "TF_VAR_litellm_version=${LITELLM_VERSION}"
+            echo "TF_VAR_middleware_version=${MIDDLEWARE_VERSION}"
             echo "TF_VAR_architecture=${TERRAFORM_ARCHITECTURE}"
-            echo "ECR_LITELLM_IMAGE_URI=${IMAGE_URI}"
+            echo "TF_VAR_enable_middleware=${ENABLE_MIDDLEWARE}"
+            echo "ECR_LITELLM_IMAGE_URI=${LITELLM_IMAGE_URI}"
+            if [[ "$ENABLE_MIDDLEWARE" == "true" ]]; then
+                echo "ECR_MIDDLEWARE_IMAGE_URI=${MIDDLEWARE_IMAGE_URI}"
+            fi
         } >> "$GITHUB_ENV"
     fi
 }
 
+validate_manifest_architecture() {
+    local image_uri="$1"
+    local expected_arch
+    local archs
+
+    expected_arch="$(echo "$DOCKER_ARCH" | cut -d'/' -f2)"
+    archs="$(docker manifest inspect "$image_uri" 2>/dev/null | jq -r '.manifests[].platform.architecture' 2>/dev/null | sort -u | tr '\n' ' ')"
+
+    if [[ -z "$archs" ]]; then
+        echo "Warning: could not inspect manifest list for $image_uri (single-arch image is still valid)."
+        return
+    fi
+
+    if [[ " $archs " != *" $expected_arch "* ]]; then
+        echo "Error: $image_uri does not include expected architecture '$expected_arch'. Found: $archs"
+        exit 1
+    fi
+
+    echo "Validated manifest arch for $image_uri: $archs"
+}
+
 echo "Preparing LiteLLM image build"
-echo "APP_NAME=${APP_NAME}"
+echo "LITELLM_REPOSITORY=${LITELLM_REPOSITORY}"
+echo "MIDDLEWARE_REPOSITORY=${MIDDLEWARE_REPOSITORY}"
 echo "LITELLM_VERSION=${LITELLM_VERSION}"
+echo "MIDDLEWARE_VERSION=${MIDDLEWARE_VERSION}"
+echo "ENABLE_MIDDLEWARE=${ENABLE_MIDDLEWARE}"
 echo "DOCKER_ARCH=${DOCKER_ARCH}"
 echo "ARCH=${ARCH}"
 
-ensure_repository
+ensure_repository "$LITELLM_REPOSITORY"
+if [[ "$ENABLE_MIDDLEWARE" == "true" ]]; then
+    ensure_repository "$MIDDLEWARE_REPOSITORY"
+fi
 prepare_build_context
 publish_environment
 
@@ -118,10 +158,27 @@ aws ecr get-login-password --region "$AWS_REGION" \
 docker build \
     --platform "$DOCKER_ARCH" \
     --build-arg "LITELLM_VERSION=${LITELLM_VERSION}" \
-    -t "${APP_NAME}:${LITELLM_VERSION}" \
-    "$BUILD_CONTEXT"
+    -t "${LITELLM_REPOSITORY}:${LITELLM_VERSION}" \
+    "$LITELLM_BUILD_CONTEXT"
 
-docker tag "${APP_NAME}:${LITELLM_VERSION}" "$IMAGE_URI"
-docker push "$IMAGE_URI"
+docker tag "${LITELLM_REPOSITORY}:${LITELLM_VERSION}" "$LITELLM_IMAGE_URI"
+docker push "$LITELLM_IMAGE_URI"
+validate_manifest_architecture "$LITELLM_IMAGE_URI"
 
-echo "Built and pushed ${IMAGE_URI}"
+if [[ "$ENABLE_MIDDLEWARE" == "true" ]]; then
+    docker build \
+        --platform "$DOCKER_ARCH" \
+        -t "${MIDDLEWARE_REPOSITORY}:${MIDDLEWARE_VERSION}" \
+        "$MIDDLEWARE_BUILD_CONTEXT"
+
+    docker tag "${MIDDLEWARE_REPOSITORY}:${MIDDLEWARE_VERSION}" "$MIDDLEWARE_IMAGE_URI"
+    docker push "$MIDDLEWARE_IMAGE_URI"
+    validate_manifest_architecture "$MIDDLEWARE_IMAGE_URI"
+else
+    echo "Skipping middleware image build/push because ENABLE_MIDDLEWARE=false"
+fi
+
+echo "Built and pushed ${LITELLM_IMAGE_URI}"
+if [[ "$ENABLE_MIDDLEWARE" == "true" ]]; then
+    echo "Built and pushed ${MIDDLEWARE_IMAGE_URI}"
+fi

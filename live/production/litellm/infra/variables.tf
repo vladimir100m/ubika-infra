@@ -52,6 +52,18 @@ variable "litellm_version" {
   default     = "latest"
 }
 
+variable "middleware_version" {
+  description = "Image tag to deploy for Middleware."
+  type        = string
+  default     = "latest"
+}
+
+variable "enable_middleware" {
+  description = "Whether to deploy middleware container and middleware ALB routing."
+  type        = bool
+  default     = false
+}
+
 ################################################################################
 # RDS
 ################################################################################
