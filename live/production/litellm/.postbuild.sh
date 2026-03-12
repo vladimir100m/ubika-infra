@@ -109,7 +109,12 @@ validate_manifest_architecture() {
     local archs
 
     expected_arch="$(echo "$DOCKER_ARCH" | cut -d'/' -f2)"
-    archs="$(docker manifest inspect "$image_uri" 2>/dev/null | jq -r '.manifests[].platform.architecture' 2>/dev/null | sort -u | tr '\n' ' ')"
+    archs="$({
+        docker manifest inspect "$image_uri" 2>/dev/null \
+            | jq -r '(.manifests[]?.platform.architecture), (.architecture? // empty), (.config.platform.architecture? // empty)' 2>/dev/null \
+            | sort -u \
+            | tr '\n' ' '
+    } || true)"
 
     if [[ -z "$archs" ]]; then
         echo "Warning: could not inspect manifest list for $image_uri (single-arch image is still valid)."
