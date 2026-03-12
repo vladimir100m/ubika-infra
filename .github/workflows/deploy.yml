@@ -7,6 +7,7 @@ on:
       - live/**
       - modules/**
       - .github/workflows/deploy.yml
+      - .github/workflows/deploy.yaml
       - .github/scripts/**
       - scripts/deploy.sh
   pull_request:
@@ -15,6 +16,7 @@ on:
       - live/**
       - modules/**
       - .github/workflows/deploy.yml
+      - .github/workflows/deploy.yaml
       - .github/scripts/**
       - scripts/deploy.sh
   workflow_dispatch:
