@@ -94,7 +94,7 @@ jobs:
         shell: bash
         run: |
           bash .github/scripts/prebuild-check.sh \
-            "$(bash scripts/deploy.sh resolve-dir '${{ matrix.layer }}')" \
+            "$(bash live/production/litellm/scripts/deploy.sh resolve-dir '${{ matrix.layer }}')" \
             "${{ needs.changes.outputs.base_sha }}" \
             "${{ needs.changes.outputs.head_sha }}" > prebuild_output.txt
           cat prebuild_output.txt
@@ -113,14 +113,14 @@ jobs:
         env:
           TF_VAR_architecture: ${{ steps.prebuild.outputs.arch }}
           TF_VAR_manage_github_actions_role_policy: ${{ matrix.layer == '_global' && 'true' || 'false' }}
-        run: bash scripts/deploy.sh terraform-plan "${{ matrix.layer }}"
+        run: bash live/production/litellm/scripts/deploy.sh terraform-plan "${{ matrix.layer }}"
 
       - name: Deploy (terraform apply)
         if: github.ref == 'refs/heads/main' && github.event_name == 'push' && (steps.prebuild.outputs.tf_changed == '1' || steps.prebuild.outputs.force_deploy == '1')
         env:
           TF_VAR_architecture: ${{ steps.prebuild.outputs.arch }}
           TF_VAR_manage_github_actions_role_policy: ${{ matrix.layer == '_global' && 'true' || 'false' }}
-        run: bash scripts/deploy.sh terraform-apply "${{ matrix.layer }}"
+        run: bash live/production/litellm/scripts/deploy.sh terraform-apply "${{ matrix.layer }}"
 
       - name: .postbuild check
         id: postbuild
@@ -128,5 +128,5 @@ jobs:
         shell: bash
         run: |
           bash .github/scripts/postbuild-check.sh \
-            "$(bash scripts/deploy.sh resolve-dir '${{ matrix.layer }}')" > postbuild_output.txt
+            "$(bash live/production/litellm/scripts/deploy.sh resolve-dir '${{ matrix.layer }}')" > postbuild_output.txt
           cat postbuild_output.txt
