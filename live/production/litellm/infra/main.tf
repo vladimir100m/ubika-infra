@@ -415,108 +415,108 @@ locals {
   memory_mib       = var.vcpus * 1024 * 2
 
   litellm_container_definition = {
-      name      = "LiteLLMContainer"
-      image     = "${data.aws_ecr_repository.litellm.repository_url}:${var.litellm_version}"
-      essential = true
+    name      = "LiteLLMContainer"
+    image     = "${data.aws_ecr_repository.litellm.repository_url}:${var.litellm_version}"
+    essential = true
 
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.litellm.name
-          "awslogs-region"        = data.aws_region.current.name
-          "awslogs-stream-prefix" = "LiteLLM"
-        }
-      }
-
-      environment = [
-        { name = "LITELLM_LOG", value = "DEBUG" },
-        { name = "LITELLM_CONFIG_BUCKET_NAME", value = module.config_bucket.bucket_name },
-        { name = "LITELLM_CONFIG_BUCKET_OBJECT_KEY", value = "config.yaml" },
-        { name = "UI_USERNAME", value = "admin" },
-        { name = "REDIS_HOST", value = module.redis.primary_endpoint },
-        { name = "REDIS_PORT", value = tostring(module.redis.port) },
-        { name = "REDIS_SSL", value = "True" },
-        { name = "LANGSMITH_PROJECT", value = var.langsmith_project },
-        { name = "LANGSMITH_DEFAULT_RUN_NAME", value = var.langsmith_default_run_name },
-        { name = "NO_DOCS", value = var.disable_swagger_page ? "True" : "False" },
-        { name = "DISABLE_ADMIN_UI", value = var.disable_admin_ui ? "True" : "False" },
-        { name = "LANGFUSE_PUBLIC_KEY", value = var.langfuse_public_key },
-        { name = "LANGFUSE_HOST", value = var.langfuse_host },
-      ]
-
-      secrets = [
-        { name = "DATABASE_URL", valueFrom = aws_secretsmanager_secret.db_url.arn },
-        { name = "LITELLM_MASTER_KEY", valueFrom = "${aws_secretsmanager_secret.master_salt.arn}:LITELLM_MASTER_KEY::" },
-        { name = "UI_PASSWORD", valueFrom = "${aws_secretsmanager_secret.master_salt.arn}:LITELLM_MASTER_KEY::" },
-        { name = "LITELLM_SALT_KEY", valueFrom = "${aws_secretsmanager_secret.master_salt.arn}:LITELLM_SALT_KEY::" },
-        { name = "REDIS_PASSWORD", valueFrom = "${aws_secretsmanager_secret.redis_auth.arn}:REDIS_PASSWORD::" },
-        { name = "OPENAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:OPENAI_API_KEY::" },
-        { name = "AZURE_OPENAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AZURE_OPENAI_API_KEY::" },
-        { name = "AZURE_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AZURE_API_KEY::" },
-        { name = "ANTHROPIC_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:ANTHROPIC_API_KEY::" },
-        { name = "GROQ_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:GROQ_API_KEY::" },
-        { name = "COHERE_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:COHERE_API_KEY::" },
-        { name = "CO_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:CO_API_KEY::" },
-        { name = "HF_TOKEN", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:HF_TOKEN::" },
-        { name = "HUGGINGFACE_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:HUGGINGFACE_API_KEY::" },
-        { name = "DATABRICKS_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:DATABRICKS_API_KEY::" },
-        { name = "GEMINI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:GEMINI_API_KEY::" },
-        { name = "CODESTRAL_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:CODESTRAL_API_KEY::" },
-        { name = "MISTRAL_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:MISTRAL_API_KEY::" },
-        { name = "AZURE_AI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AZURE_AI_API_KEY::" },
-        { name = "NVIDIA_NIM_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:NVIDIA_NIM_API_KEY::" },
-        { name = "XAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:XAI_API_KEY::" },
-        { name = "PERPLEXITYAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:PERPLEXITYAI_API_KEY::" },
-        { name = "GITHUB_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:GITHUB_API_KEY::" },
-        { name = "DEEPSEEK_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:DEEPSEEK_API_KEY::" },
-        { name = "AI21_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AI21_API_KEY::" },
-        { name = "LANGSMITH_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:LANGSMITH_API_KEY::" },
-        { name = "LANGFUSE_SECRET_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:LANGFUSE_SECRET_KEY::" },
-      ]
-
-      portMappings = [{ containerPort = 4000, protocol = "tcp" }]
-
-      healthCheck = {
-        command  = ["CMD-SHELL", "exit 0"]
-        interval = 30
-        timeout  = 5
-        retries  = 3
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = aws_cloudwatch_log_group.litellm.name
+        "awslogs-region"        = data.aws_region.current.name
+        "awslogs-stream-prefix" = "LiteLLM"
       }
     }
+
+    environment = [
+      { name = "LITELLM_LOG", value = "DEBUG" },
+      { name = "LITELLM_CONFIG_BUCKET_NAME", value = module.config_bucket.bucket_name },
+      { name = "LITELLM_CONFIG_BUCKET_OBJECT_KEY", value = "config.yaml" },
+      { name = "UI_USERNAME", value = "admin" },
+      { name = "REDIS_HOST", value = module.redis.primary_endpoint },
+      { name = "REDIS_PORT", value = tostring(module.redis.port) },
+      { name = "REDIS_SSL", value = "True" },
+      { name = "LANGSMITH_PROJECT", value = var.langsmith_project },
+      { name = "LANGSMITH_DEFAULT_RUN_NAME", value = var.langsmith_default_run_name },
+      { name = "NO_DOCS", value = var.disable_swagger_page ? "True" : "False" },
+      { name = "DISABLE_ADMIN_UI", value = var.disable_admin_ui ? "True" : "False" },
+      { name = "LANGFUSE_PUBLIC_KEY", value = var.langfuse_public_key },
+      { name = "LANGFUSE_HOST", value = var.langfuse_host },
+    ]
+
+    secrets = [
+      { name = "DATABASE_URL", valueFrom = aws_secretsmanager_secret.db_url.arn },
+      { name = "LITELLM_MASTER_KEY", valueFrom = "${aws_secretsmanager_secret.master_salt.arn}:LITELLM_MASTER_KEY::" },
+      { name = "UI_PASSWORD", valueFrom = "${aws_secretsmanager_secret.master_salt.arn}:LITELLM_MASTER_KEY::" },
+      { name = "LITELLM_SALT_KEY", valueFrom = "${aws_secretsmanager_secret.master_salt.arn}:LITELLM_SALT_KEY::" },
+      { name = "REDIS_PASSWORD", valueFrom = "${aws_secretsmanager_secret.redis_auth.arn}:REDIS_PASSWORD::" },
+      { name = "OPENAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:OPENAI_API_KEY::" },
+      { name = "AZURE_OPENAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AZURE_OPENAI_API_KEY::" },
+      { name = "AZURE_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AZURE_API_KEY::" },
+      { name = "ANTHROPIC_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:ANTHROPIC_API_KEY::" },
+      { name = "GROQ_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:GROQ_API_KEY::" },
+      { name = "COHERE_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:COHERE_API_KEY::" },
+      { name = "CO_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:CO_API_KEY::" },
+      { name = "HF_TOKEN", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:HF_TOKEN::" },
+      { name = "HUGGINGFACE_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:HUGGINGFACE_API_KEY::" },
+      { name = "DATABRICKS_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:DATABRICKS_API_KEY::" },
+      { name = "GEMINI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:GEMINI_API_KEY::" },
+      { name = "CODESTRAL_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:CODESTRAL_API_KEY::" },
+      { name = "MISTRAL_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:MISTRAL_API_KEY::" },
+      { name = "AZURE_AI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AZURE_AI_API_KEY::" },
+      { name = "NVIDIA_NIM_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:NVIDIA_NIM_API_KEY::" },
+      { name = "XAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:XAI_API_KEY::" },
+      { name = "PERPLEXITYAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:PERPLEXITYAI_API_KEY::" },
+      { name = "GITHUB_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:GITHUB_API_KEY::" },
+      { name = "DEEPSEEK_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:DEEPSEEK_API_KEY::" },
+      { name = "AI21_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AI21_API_KEY::" },
+      { name = "LANGSMITH_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:LANGSMITH_API_KEY::" },
+      { name = "LANGFUSE_SECRET_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:LANGFUSE_SECRET_KEY::" },
+    ]
+
+    portMappings = [{ containerPort = 4000, protocol = "tcp" }]
+
+    healthCheck = {
+      command  = ["CMD-SHELL", "exit 0"]
+      interval = 30
+      timeout  = 5
+      retries  = 3
+    }
+  }
 
   middleware_container_definition = {
-      name      = "MiddlewareContainer"
-      image     = "${data.aws_ecr_repository.middleware.repository_url}:${var.middleware_version}"
-      essential = true
+    name      = "MiddlewareContainer"
+    image     = "${data.aws_ecr_repository.middleware.repository_url}:${var.middleware_version}"
+    essential = true
 
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.middleware.name
-          "awslogs-region"        = data.aws_region.current.name
-          "awslogs-stream-prefix" = "Middleware"
-        }
-      }
-
-      environment = [
-        { name = "OKTA_ISSUER", value = var.okta_issuer },
-        { name = "OKTA_AUDIENCE", value = var.okta_audience },
-      ]
-
-      secrets = [
-        { name = "DATABASE_MIDDLEWARE_URL", valueFrom = aws_secretsmanager_secret.db_url.arn },
-        { name = "MASTER_KEY", valueFrom = "${aws_secretsmanager_secret.master_salt.arn}:LITELLM_MASTER_KEY::" },
-      ]
-
-      portMappings = [{ containerPort = 3000, protocol = "tcp" }]
-
-      healthCheck = {
-        command  = ["CMD-SHELL", "exit 0"]
-        interval = 30
-        timeout  = 5
-        retries  = 3
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = aws_cloudwatch_log_group.middleware.name
+        "awslogs-region"        = data.aws_region.current.name
+        "awslogs-stream-prefix" = "Middleware"
       }
     }
+
+    environment = [
+      { name = "OKTA_ISSUER", value = var.okta_issuer },
+      { name = "OKTA_AUDIENCE", value = var.okta_audience },
+    ]
+
+    secrets = [
+      { name = "DATABASE_MIDDLEWARE_URL", valueFrom = aws_secretsmanager_secret.db_url.arn },
+      { name = "MASTER_KEY", valueFrom = "${aws_secretsmanager_secret.master_salt.arn}:LITELLM_MASTER_KEY::" },
+    ]
+
+    portMappings = [{ containerPort = 3000, protocol = "tcp" }]
+
+    healthCheck = {
+      command  = ["CMD-SHELL", "exit 0"]
+      interval = 30
+      timeout  = 5
+      retries  = 3
+    }
+  }
 
   container_definitions = jsonencode(concat(
     [local.litellm_container_definition],

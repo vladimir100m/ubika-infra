@@ -12,6 +12,7 @@ set -euo pipefail
 LAYER_DIR="$1"
 BASE_SHA="${2:-}"
 HEAD_SHA="${3:-}"
+ARCH="x86"
 
 TF_CHANGED=0
 FORCE_DEPLOY=0
@@ -29,5 +30,22 @@ elif git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -E "^${LAYER_DIR}/(forc
   TF_CHANGED=1
 fi
 
+case "${CPU_ARCHITECTURE:-$(uname -m)}" in
+  x86|x86_64)
+    ARCH="x86"
+    ;;
+  arm|arm64|aarch64)
+    ARCH="arm"
+    ;;
+  *)
+    ARCH="x86"
+    ;;
+esac
+
+echo "[prebuild-check] LAYER_DIR=$LAYER_DIR"
+echo "[prebuild-check] BASE_SHA=${BASE_SHA:-<empty>}"
+echo "[prebuild-check] HEAD_SHA=${HEAD_SHA:-<empty>}"
+
 echo "TF_CHANGED=$TF_CHANGED"
 echo "FORCE_DEPLOY=$FORCE_DEPLOY"
+echo "ARCH=$ARCH"
