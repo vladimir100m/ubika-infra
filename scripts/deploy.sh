@@ -3,6 +3,7 @@ set -euo pipefail
 
 # Usage: scripts/deploy.sh <command> [args...]
 # Commands:
+#   detect-layers <base_sha> <head_sha>
 #   terraform-plan <layer>
 #   terraform-apply <layer>
 #   resolve-dir <layer>
@@ -11,6 +12,65 @@ COMMAND="${1:-}"
 LAYER="${2:-}"
 
 case "$COMMAND" in
+  detect-layers)
+    BASE_SHA="${2:-}"
+    HEAD_SHA="${3:-}"
+
+    is_valid_commit() {
+      local sha="$1"
+      [[ -n "$sha" ]] && git cat-file -e "${sha}^{commit}" 2>/dev/null
+    }
+
+    all_layers_json() {
+      find live -type f -name main.tf -print \
+        | sed 's|/main.tf$||' \
+        | sed 's|^live/||' \
+        | sort -u \
+        | jq -R -s -c 'split("\n") | map(select(length > 0))'
+    }
+
+    nearest_layer_for_path() {
+      local path="$1"
+      local dir
+      dir="$(dirname "$path")"
+
+      while [[ "$dir" == live* && "$dir" != "live" ]]; do
+        if [[ -f "$dir/main.tf" ]]; then
+          echo "${dir#live/}"
+          return 0
+        fi
+        dir="$(dirname "$dir")"
+      done
+
+      return 1
+    }
+
+    if ! is_valid_commit "$BASE_SHA" || ! is_valid_commit "$HEAD_SHA"; then
+      all_layers_json
+      exit 0
+    fi
+
+    CHANGED_FILES="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+
+    if grep -q '^modules/' <<< "$CHANGED_FILES"; then
+      all_layers_json
+      exit 0
+    fi
+
+    LAYERS="$(
+      while IFS= read -r file; do
+        [[ -z "$file" ]] && continue
+        [[ "$file" != live/* ]] && continue
+        nearest_layer_for_path "$file" || true
+      done <<< "$CHANGED_FILES" | sort -u
+    )"
+
+    if [[ -z "$LAYERS" ]]; then
+      echo '[]'
+    else
+      printf '%s\n' "$LAYERS" | jq -R -s -c 'split("\n") | map(select(length > 0))'
+    fi
+    ;;
   terraform-plan)
     terraform -chdir="$LAYER" plan -out=tfplan
     ;;
@@ -24,7 +84,7 @@ case "$COMMAND" in
     ;;
   *)
     echo "Unknown command: $COMMAND"
-    echo "Usage: scripts/deploy.sh <terraform-plan|terraform-apply|resolve-dir> <layer>"
+    echo "Usage: scripts/deploy.sh <detect-layers|terraform-plan|terraform-apply|resolve-dir> <args>"
     exit 1
     ;;
 esac
