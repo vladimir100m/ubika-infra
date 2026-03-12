@@ -15,7 +15,7 @@ MIDDLEWARE_REPOSITORY="${ECR_MIDDLEWARE_REPOSITORY:-middleware}"
 BUILD_FROM_SOURCE="$(echo "${BUILD_FROM_SOURCE:-false}" | tr '[:upper:]' '[:lower:]')"
 ENABLE_MIDDLEWARE="$(echo "${ENABLE_MIDDLEWARE:-${TF_VAR_enable_middleware:-false}}" | tr '[:upper:]' '[:lower:]')"
 AWS_REGION="${AWS_REGION}"
-LITELLM_VERSION="${LITELLM_VERSION:-${TF_VAR_litellm_version:-latest}}"
+LITELLM_VERSION="${LITELLM_VERSION:-${TF_VAR_litellm_version:-litellm_stable_release_branch-v1.73.0-stable}}"
 MIDDLEWARE_VERSION="${MIDDLEWARE_VERSION:-${TF_VAR_middleware_version:-latest}}"
 CPU_ARCHITECTURE="${CPU_ARCHITECTURE:-${DOCKER_ARCH:-linux/amd64}}"
 
@@ -91,7 +91,6 @@ build_and_push_image() {
 
     local build_args=(
         --platform "$DOCKER_ARCH"
-        --build-arg "TARGETPLATFORM=${DOCKER_ARCH}"
     )
 
     if [[ "$include_litellm_version_arg" == "true" ]]; then

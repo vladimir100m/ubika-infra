@@ -11,6 +11,27 @@ set -euo pipefail
 COMMAND="${1:-}"
 LAYER="${2:-}"
 
+resolve_layer_dir() {
+  local layer_input="$1"
+
+  if [[ -z "$layer_input" ]]; then
+    echo ""
+    return 0
+  fi
+
+  if [[ -d "$layer_input" ]]; then
+    echo "$layer_input"
+    return 0
+  fi
+
+  if [[ -d "live/$layer_input" ]]; then
+    echo "live/$layer_input"
+    return 0
+  fi
+
+  echo "$layer_input"
+}
+
 case "$COMMAND" in
   detect-layers)
     BASE_SHA="${2:-}"
@@ -72,10 +93,12 @@ case "$COMMAND" in
     fi
     ;;
   terraform-plan)
-    terraform -chdir="$LAYER" plan -out=tfplan
+    LAYER_DIR="$(resolve_layer_dir "$LAYER")"
+    terraform -chdir="$LAYER_DIR" plan -out=tfplan
     ;;
   terraform-apply)
-    terraform -chdir="$LAYER" apply tfplan
+    LAYER_DIR="$(resolve_layer_dir "$LAYER")"
+    terraform -chdir="$LAYER_DIR" apply tfplan
     ;;
   resolve-dir)
     # This is a placeholder for resolving a layer directory
