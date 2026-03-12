@@ -21,6 +21,23 @@ HEAD_SHA="${3:?head_sha is required}"
 EXCLUDE_LAYERS="${4:-[]}"
 MANUAL_LAYER="${5:-}"
 
+emit_output() {
+    local key="$1"
+    local value="$2"
+
+    if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+        echo "${key}=${value}" >> "$GITHUB_OUTPUT"
+    fi
+
+    echo "${key}=${value}"
+}
+
+echo "[detect-layers] EVENT_NAME=${EVENT_NAME}"
+echo "[detect-layers] BASE_SHA=${BASE_SHA}"
+echo "[detect-layers] HEAD_SHA=${HEAD_SHA}"
+echo "[detect-layers] EXCLUDE_LAYERS=${EXCLUDE_LAYERS}"
+echo "[detect-layers] MANUAL_LAYER=${MANUAL_LAYER:-<empty>}"
+
 filter_layers() {
     local json="$1"
     jq -c --argjson exclude "${EXCLUDE_LAYERS}" '
@@ -33,15 +50,15 @@ if [[ "$EVENT_NAME" == "workflow_dispatch" && -n "$MANUAL_LAYER" ]]; then
     layers_json="[\"${MANUAL_LAYER}\"]"
     filtered="$(filter_layers "$layers_json")"
 
-    echo "layers=${filtered}" >> "$GITHUB_OUTPUT"
-    echo "base_sha=" >> "$GITHUB_OUTPUT"
-    echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+    emit_output "layers" "$filtered"
+    emit_output "base_sha" ""
+    emit_output "head_sha" "$HEAD_SHA"
     exit 0
 fi
 
 layers_json="$(bash scripts/deploy.sh detect-layers "${BASE_SHA}" "${HEAD_SHA}")"
 filtered="$(filter_layers "$layers_json")"
 
-echo "layers=${filtered}" >> "$GITHUB_OUTPUT"
-echo "base_sha=${BASE_SHA}" >> "$GITHUB_OUTPUT"
-echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+emit_output "layers" "$filtered"
+emit_output "base_sha" "$BASE_SHA"
+emit_output "head_sha" "$HEAD_SHA"

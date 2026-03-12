@@ -89,42 +89,42 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Terraform Change Check
-        id: tfcheck
+      - name: .prebuild check
+        id: prebuild
         shell: bash
         run: |
           bash .github/scripts/prebuild-check.sh \
             "$(bash scripts/deploy.sh resolve-dir '${{ matrix.layer }}')" \
             "${{ needs.changes.outputs.base_sha }}" \
-            "${{ needs.changes.outputs.head_sha }}" > tfcheck_output.txt
-          cat tfcheck_output.txt
-          TF_CHANGED=$(grep TF_CHANGED tfcheck_output.txt | cut -d'=' -f2 | xargs)
-          FORCE_DEPLOY=$(grep FORCE_DEPLOY tfcheck_output.txt | cut -d'=' -f2 | xargs)
+            "${{ needs.changes.outputs.head_sha }}" > prebuild_output.txt
+          cat prebuild_output.txt
+          TF_CHANGED=$(grep '^TF_CHANGED=' prebuild_output.txt | cut -d'=' -f2 | xargs)
+          FORCE_DEPLOY=$(grep '^FORCE_DEPLOY=' prebuild_output.txt | cut -d'=' -f2 | xargs)
+          ARCH=$(grep '^ARCH=' prebuild_output.txt | cut -d'=' -f2 | xargs)
           echo "tf_changed=${TF_CHANGED:-0}" >> "$GITHUB_OUTPUT"
           echo "force_deploy=${FORCE_DEPLOY:-0}" >> "$GITHUB_OUTPUT"
-
-      - name: Postbuild Check
-        id: postbuild
-        if: steps.tfcheck.outputs.tf_changed == '1' || steps.tfcheck.outputs.force_deploy == '1'
-        shell: bash
-        run: |
-          bash .github/scripts/postbuild-check.sh \
-            "$(bash scripts/deploy.sh resolve-dir '${{ matrix.layer }}')" > postbuild_output.txt
-          cat postbuild_output.txt
-          ARCH=$(grep "^ARCH=" postbuild_output.txt | tail -n1 | cut -d'=' -f2 | xargs)
           echo "arch=${ARCH:-x86}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
-      - name: Terraform Plan
-        if: steps.tfcheck.outputs.tf_changed == '1' || steps.tfcheck.outputs.force_deploy == '1'
+      - name: Build (terraform plan)
+        if: steps.prebuild.outputs.tf_changed == '1' || steps.prebuild.outputs.force_deploy == '1'
         env:
-          TF_VAR_architecture: ${{ steps.postbuild.outputs.arch }}
+          TF_VAR_architecture: ${{ steps.prebuild.outputs.arch }}
         run: bash scripts/deploy.sh terraform-plan "${{ matrix.layer }}"
 
-      - name: Terraform Apply
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && (steps.tfcheck.outputs.tf_changed == '1' || steps.tfcheck.outputs.force_deploy == '1')
+      - name: Deploy (terraform apply)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && (steps.prebuild.outputs.tf_changed == '1' || steps.prebuild.outputs.force_deploy == '1')
         env:
-          TF_VAR_architecture: ${{ steps.postbuild.outputs.arch }}
+          TF_VAR_architecture: ${{ steps.prebuild.outputs.arch }}
         run: bash scripts/deploy.sh terraform-apply "${{ matrix.layer }}"
+
+      - name: .postbuild check
+        id: postbuild
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && (steps.prebuild.outputs.tf_changed == '1' || steps.prebuild.outputs.force_deploy == '1')
+        shell: bash
+        run: |
+          bash .github/scripts/postbuild-check.sh \
+            "$(bash scripts/deploy.sh resolve-dir '${{ matrix.layer }}')" > postbuild_output.txt
+          cat postbuild_output.txt
