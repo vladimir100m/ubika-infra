@@ -14,55 +14,22 @@ LITELLM_REPOSITORY="${APP_NAME:-${ECR_LITELLM_REPOSITORY:-litellm}}"
 MIDDLEWARE_REPOSITORY="${ECR_MIDDLEWARE_REPOSITORY:-middleware}"
 BUILD_FROM_SOURCE="$(echo "${BUILD_FROM_SOURCE:-false}" | tr '[:upper:]' '[:lower:]')"
 ENABLE_MIDDLEWARE="$(echo "${ENABLE_MIDDLEWARE:-${TF_VAR_enable_middleware:-false}}" | tr '[:upper:]' '[:lower:]')"
-AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
+AWS_REGION="${AWS_REGION}"
 LITELLM_VERSION="${LITELLM_VERSION:-${TF_VAR_litellm_version:-latest}}"
 MIDDLEWARE_VERSION="${MIDDLEWARE_VERSION:-${TF_VAR_middleware_version:-latest}}"
-CPU_ARCHITECTURE="${CPU_ARCHITECTURE:-}"
+CPU_ARCHITECTURE="${CPU_ARCHITECTURE:-${DOCKER_ARCH:-linux/amd64}}"
+
+normalize_bool() {
+    echo "$1" | tr '[:upper:]' '[:lower:]'
+}
 
 if [[ "$LITELLM_VERSION" == "placeholder" ]]; then
     echo "LITELLM_VERSION must be set via .env, TF_VAR_litellm_version, or environment variables"
     exit 1
 fi
 
-if [[ -n "$CPU_ARCHITECTURE" ]]; then
-    case "$CPU_ARCHITECTURE" in
-        "x86"|"arm")
-            ARCH="$CPU_ARCHITECTURE"
-            ;;
-        *)
-            echo "Error: CPU_ARCHITECTURE must be either 'x86' or 'arm'"
-            exit 1
-            ;;
-    esac
-else
-    case "$(uname -m)" in
-        x86_64)
-            ARCH="x86"
-            ;;
-        arm64|aarch64)
-            ARCH="arm"
-            ;;
-        *)
-            echo "Unsupported architecture: $(uname -m)"
-            exit 1
-            ;;
-    esac
-fi
-
-case "$ARCH" in
-    "x86")
-        DOCKER_ARCH="linux/amd64"
-        TERRAFORM_ARCHITECTURE="x86"
-        ;;
-    "arm")
-        DOCKER_ARCH="linux/arm64"
-        TERRAFORM_ARCHITECTURE="arm"
-        ;;
-    *)
-        echo "Unsupported architecture: $ARCH"
-        exit 1
-        ;;
-esac
+DOCKER_ARCH="$CPU_ARCHITECTURE"
+TERRAFORM_ARCHITECTURE="${TF_VAR_architecture:-x86}"
 
 AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query 'Account' --output text)"
 ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
@@ -115,6 +82,28 @@ publish_environment() {
     fi
 }
 
+build_and_push_image() {
+    local repository="$1"
+    local version="$2"
+    local context="$3"
+    local image_uri="$4"
+    local include_litellm_version_arg="${5:-false}"
+
+    local build_args=(
+        --platform "$DOCKER_ARCH"
+        --build-arg "TARGETPLATFORM=${DOCKER_ARCH}"
+    )
+
+    if [[ "$include_litellm_version_arg" == "true" ]]; then
+        build_args+=(--build-arg "LITELLM_VERSION=${version}")
+    fi
+
+    docker build "${build_args[@]}" -t "${repository}:${version}" "$context"
+    docker tag "${repository}:${version}" "$image_uri"
+    docker push "$image_uri"
+    validate_manifest_architecture "$image_uri"
+}
+
 validate_manifest_architecture() {
     local image_uri="$1"
     local expected_arch
@@ -143,7 +132,6 @@ echo "LITELLM_VERSION=${LITELLM_VERSION}"
 echo "MIDDLEWARE_VERSION=${MIDDLEWARE_VERSION}"
 echo "ENABLE_MIDDLEWARE=${ENABLE_MIDDLEWARE}"
 echo "DOCKER_ARCH=${DOCKER_ARCH}"
-echo "ARCH=${ARCH}"
 
 ensure_repository "$LITELLM_REPOSITORY"
 if [[ "$ENABLE_MIDDLEWARE" == "true" ]]; then
@@ -155,27 +143,19 @@ publish_environment
 aws ecr get-login-password --region "$AWS_REGION" \
     | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
-docker build \
-    --platform "$DOCKER_ARCH" \
-    --build-arg "LITELLM_VERSION=${LITELLM_VERSION}" \
-    --build-arg "TARGETPLATFORM=${DOCKER_ARCH}" \
-    -t "${LITELLM_REPOSITORY}:${LITELLM_VERSION}" \
-    "$LITELLM_BUILD_CONTEXT"
-
-docker tag "${LITELLM_REPOSITORY}:${LITELLM_VERSION}" "$LITELLM_IMAGE_URI"
-docker push "$LITELLM_IMAGE_URI"
-validate_manifest_architecture "$LITELLM_IMAGE_URI"
+build_and_push_image \
+    "$LITELLM_REPOSITORY" \
+    "$LITELLM_VERSION" \
+    "$LITELLM_BUILD_CONTEXT" \
+    "$LITELLM_IMAGE_URI" \
+    "true"
 
 if [[ "$ENABLE_MIDDLEWARE" == "true" ]]; then
-    docker build \
-        --platform "$DOCKER_ARCH" \
-        --build-arg "TARGETPLATFORM=${DOCKER_ARCH}" \
-        -t "${MIDDLEWARE_REPOSITORY}:${MIDDLEWARE_VERSION}" \
-        "$MIDDLEWARE_BUILD_CONTEXT"
-
-    docker tag "${MIDDLEWARE_REPOSITORY}:${MIDDLEWARE_VERSION}" "$MIDDLEWARE_IMAGE_URI"
-    docker push "$MIDDLEWARE_IMAGE_URI"
-    validate_manifest_architecture "$MIDDLEWARE_IMAGE_URI"
+    build_and_push_image \
+        "$MIDDLEWARE_REPOSITORY" \
+        "$MIDDLEWARE_VERSION" \
+        "$MIDDLEWARE_BUILD_CONTEXT" \
+        "$MIDDLEWARE_IMAGE_URI"
 else
     echo "Skipping middleware image build/push because ENABLE_MIDDLEWARE=false"
 fi
