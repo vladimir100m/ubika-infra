@@ -20,7 +20,7 @@ is_valid_commit() {
 }
 
 TF_CHANGED=0
-FORCE_DEPLOY=1
+FORCE_DEPLOY=0
 
 if ! is_valid_commit "$BASE_SHA" || ! is_valid_commit "$HEAD_SHA"; then
   echo "[prebuild-check] warning: invalid BASE_SHA/HEAD_SHA, forcing TF_CHANGED=1"
