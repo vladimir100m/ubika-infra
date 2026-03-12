@@ -48,85 +48,123 @@ jobs:
       head_sha: ${{ steps.detect.outputs.head_sha }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Detect changed layers
-        id: detect
-        shell: bash
-        run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          else
-            BASE_SHA="${{ github.event.before }}"
-          fi
+        jobs:
+          changes:
+            name: Detect changed layers
+            runs-on: ubuntu-latest
+            outputs:
+              layers: ${{ steps.detect.outputs.layers }}
+              base_sha: ${{ steps.detect.outputs.base_sha }}
+              head_sha: ${{ steps.detect.outputs.head_sha }}
+            steps:
+              - name: Checkout
+                uses: actions/checkout@v4
+                with:
+                  fetch-depth: 0
 
-          bash .github/scripts/detect-layers.sh \
-            "${{ github.event_name }}" \
-            "${BASE_SHA}" \
-            "${{ github.sha }}" \
-            '${{ env.DEPLOY_EXCLUDE_LAYERS }}' \
-            "${{ inputs.layer }}"
+              - name: Detect changed layers
+                id: detect
+                shell: bash
+                run: |
+                  if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+                    BASE_SHA="${{ github.event.pull_request.base.sha }}"
+                  else
+                    BASE_SHA="${{ github.event.before }}"
+                  fi
 
-  deploy:
-    name: "[${{ matrix.layer }}] Terraform"
-    needs: changes
-    if: ${{ needs.changes.outputs.layers != '[]' }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        layer: ${{ fromJSON(needs.changes.outputs.layers) }}
+                  bash .github/scripts/detect-layers.sh \
+                    "${{ github.event_name }}" \
+                    "${BASE_SHA}" \
+                    "${{ github.sha }}" \
+                    '${{ env.DEPLOY_EXCLUDE_LAYERS }}' \
+                    "${{ inputs.layer }}"
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+          prebuild:
+            name: "[${{ matrix.layer }}] Prebuild"
+            needs: changes
+            if: ${{ needs.changes.outputs.layers != '[]' }}
+            runs-on: ubuntu-latest
+            strategy:
+              fail-fast: false
+              matrix:
+                layer: ${{ fromJSON(needs.changes.outputs.layers) }}
+            outputs:
+              tf_changed: ${{ steps.prebuild.outputs.tf_changed }}
+              force_deploy: ${{ steps.prebuild.outputs.force_deploy }}
+              arch: ${{ steps.prebuild.outputs.arch }}
+            steps:
+              - name: Checkout
+                uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+              - name: .prebuild check
+                id: prebuild
+                shell: bash
+                run: |
+                  bash .github/scripts/prebuild-check.sh \
+                    "$(bash live/production/litellm/scripts/deploy.sh resolve-dir '${{ matrix.layer }}')" \
+                    "${{ needs.changes.outputs.base_sha }}" \
+                    "${{ needs.changes.outputs.head_sha }}" > prebuild_output.txt
+                  cat prebuild_output.txt
+                  TF_CHANGED=$(grep '^TF_CHANGED=' prebuild_output.txt | cut -d'=' -f2 | xargs)
+                  FORCE_DEPLOY=$(grep '^FORCE_DEPLOY=' prebuild_output.txt | cut -d'=' -f2 | xargs)
+                  ARCH=$(grep '^ARCH=' prebuild_output.txt | cut -d'=' -f2 | xargs)
+                  echo "tf_changed=${TF_CHANGED:-0}" >> "$GITHUB_OUTPUT"
+                  echo "force_deploy=${FORCE_DEPLOY:-0}" >> "$GITHUB_OUTPUT"
+                  echo "arch=${ARCH:-x86}" >> "$GITHUB_OUTPUT"
 
-      - name: .prebuild check
-        id: prebuild
-        shell: bash
-        run: |
-          bash .github/scripts/prebuild-check.sh \
-            "$(bash live/production/litellm/scripts/deploy.sh resolve-dir '${{ matrix.layer }}')" \
-            "${{ needs.changes.outputs.base_sha }}" \
-            "${{ needs.changes.outputs.head_sha }}" > prebuild_output.txt
-          cat prebuild_output.txt
-          TF_CHANGED=$(grep '^TF_CHANGED=' prebuild_output.txt | cut -d'=' -f2 | xargs)
-          FORCE_DEPLOY=$(grep '^FORCE_DEPLOY=' prebuild_output.txt | cut -d'=' -f2 | xargs)
-          ARCH=$(grep '^ARCH=' prebuild_output.txt | cut -d'=' -f2 | xargs)
-          echo "tf_changed=${TF_CHANGED:-0}" >> "$GITHUB_OUTPUT"
-          echo "force_deploy=${FORCE_DEPLOY:-0}" >> "$GITHUB_OUTPUT"
-          echo "arch=${ARCH:-x86}" >> "$GITHUB_OUTPUT"
+          deploy:
+            name: "[${{ matrix.layer }}] Terraform"
+            needs: prebuild
+            if: ${{ needs.prebuild.outputs.tf_changed == '1' || needs.prebuild.outputs.force_deploy == '1' }}
+            runs-on: ubuntu-latest
+            strategy:
+              fail-fast: false
+              matrix:
+                layer: ${{ fromJSON(needs.changes.outputs.layers) }}
+            steps:
+              - name: Checkout
+                uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+              - name: Configure AWS credentials (OIDC)
+                uses: aws-actions/configure-aws-credentials@v4
+                with:
+                  role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+                  aws-region: ${{ env.AWS_REGION }}
 
-      - name: Build (terraform plan)
-        if: steps.prebuild.outputs.tf_changed == '1' || steps.prebuild.outputs.force_deploy == '1'
-        env:
-          TF_VAR_architecture: ${{ steps.prebuild.outputs.arch }}
-          TF_VAR_manage_github_actions_role_policy: ${{ matrix.layer == '_global' && 'true' || 'false' }}
-        run: bash live/production/litellm/scripts/deploy.sh terraform-plan "${{ matrix.layer }}"
+              - name: Setup Terraform
+                uses: hashicorp/setup-terraform@v3
 
-      - name: Deploy (terraform apply)
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && (steps.prebuild.outputs.tf_changed == '1' || steps.prebuild.outputs.force_deploy == '1')
-        env:
-          TF_VAR_architecture: ${{ steps.prebuild.outputs.arch }}
-          TF_VAR_manage_github_actions_role_policy: ${{ matrix.layer == '_global' && 'true' || 'false' }}
-        run: bash live/production/litellm/scripts/deploy.sh terraform-apply "${{ matrix.layer }}"
+              - name: Build (terraform plan)
+                env:
+                  TF_VAR_architecture: ${{ needs.prebuild.outputs.arch }}
+                  TF_VAR_manage_github_actions_role_policy: ${{ matrix.layer == '_global' && 'true' || 'false' }}
+                run: bash live/production/litellm/scripts/deploy.sh terraform-plan "${{ matrix.layer }}"
 
-      - name: .postbuild check
-        id: postbuild
-        # if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        shell: bash
-        run: |
-          bash .github/scripts/postbuild-check.sh \
-            "$(bash live/production/litellm/scripts/deploy.sh resolve-dir '${{ matrix.layer }}')" > postbuild_output.txt
-          cat postbuild_output.txt
+              - name: Deploy (terraform apply)
+                if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+                env:
+                  TF_VAR_architecture: ${{ needs.prebuild.outputs.arch }}
+                  TF_VAR_manage_github_actions_role_policy: ${{ matrix.layer == '_global' && 'true' || 'false' }}
+                run: bash live/production/litellm/scripts/deploy.sh terraform-apply "${{ matrix.layer }}"
+
+          postbuild:
+            name: "[${{ matrix.layer }}] Postbuild"
+            needs: deploy
+            if: ${{ always() }}
+            runs-on: ubuntu-latest
+            strategy:
+              fail-fast: false
+              matrix:
+                layer: ${{ fromJSON(needs.changes.outputs.layers) }}
+            steps:
+              - name: Checkout
+                uses: actions/checkout@v4
+
+              - name: .postbuild check
+                id: postbuild
+                shell: bash
+                run: |
+                  bash .github/scripts/postbuild-check.sh \
+                    "$(bash live/production/litellm/scripts/deploy.sh resolve-dir '${{ matrix.layer }}')" > postbuild_output.txt
+                  cat postbuild_output.txt
