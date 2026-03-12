@@ -1,6 +1,6 @@
 ###############################################################################
 # live/production/litellm/infra
-#
+# force
 # Main LiteLLM infrastructure layer.
 # Reads networking state from live/production/networking/ and wires together:
 #
@@ -140,6 +140,7 @@ module "iam" {
     aws_secretsmanager_secret.master_salt.arn,
     aws_secretsmanager_secret.db_url.arn,
     aws_secretsmanager_secret.llm_api_keys.arn,
+    aws_secretsmanager_secret.redis_auth.arn,
   ]
 
   # Attachments are created in root to avoid for_each unknown issues at plan time.
@@ -257,6 +258,20 @@ resource "aws_secretsmanager_secret_version" "llm_api_keys" {
     LANGSMITH_API_KEY    = var.langsmith_api_key
     LANGFUSE_SECRET_KEY  = var.langfuse_secret_key
   })
+}
+
+resource "aws_secretsmanager_secret" "redis_auth" {
+  name_prefix             = "${var.name}-litellm-redis-auth-"
+  recovery_window_in_days = 0
+}
+
+resource "aws_secretsmanager_secret_version" "redis_auth" {
+  secret_id = aws_secretsmanager_secret.redis_auth.id
+  secret_string = jsonencode({
+    REDIS_PASSWORD = module.redis.auth_token
+  })
+
+  depends_on = [module.redis]
 }
 
 # ── Config bucket: upload config.yaml ────────────────────────────────────────
@@ -430,7 +445,7 @@ locals {
         { name = "LITELLM_MASTER_KEY", valueFrom = "${aws_secretsmanager_secret.master_salt.arn}:LITELLM_MASTER_KEY::" },
         { name = "UI_PASSWORD", valueFrom = "${aws_secretsmanager_secret.master_salt.arn}:LITELLM_MASTER_KEY::" },
         { name = "LITELLM_SALT_KEY", valueFrom = "${aws_secretsmanager_secret.master_salt.arn}:LITELLM_SALT_KEY::" },
-        { name = "REDIS_PASSWORD", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:REDIS_PASSWORD::" },
+        { name = "REDIS_PASSWORD", valueFrom = "${aws_secretsmanager_secret.redis_auth.arn}:REDIS_PASSWORD::" },
         { name = "OPENAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:OPENAI_API_KEY::" },
         { name = "AZURE_OPENAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AZURE_OPENAI_API_KEY::" },
         { name = "AZURE_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AZURE_API_KEY::" },
@@ -547,6 +562,7 @@ module "service" {
     aws_secretsmanager_secret_version.master_salt,
     aws_secretsmanager_secret_version.db_url,
     aws_secretsmanager_secret_version.llm_api_keys,
+    aws_secretsmanager_secret_version.redis_auth,
   ]
 }
 
