@@ -1,3 +1,2 @@
 ARG LITELLM_VERSION=latest
-ARG TARGETPLATFORM
-FROM --platform=$TARGETPLATFORM ghcr.io/berriai/litellm:${LITELLM_VERSION}
+FROM ghcr.io/berriai/litellm:${LITELLM_VERSION}

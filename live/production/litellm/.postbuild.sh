@@ -158,6 +158,7 @@ aws ecr get-login-password --region "$AWS_REGION" \
 docker build \
     --platform "$DOCKER_ARCH" \
     --build-arg "LITELLM_VERSION=${LITELLM_VERSION}" \
+    --build-arg "TARGETPLATFORM=${DOCKER_ARCH}" \
     -t "${LITELLM_REPOSITORY}:${LITELLM_VERSION}" \
     "$LITELLM_BUILD_CONTEXT"
 
@@ -168,6 +169,7 @@ validate_manifest_architecture "$LITELLM_IMAGE_URI"
 if [[ "$ENABLE_MIDDLEWARE" == "true" ]]; then
     docker build \
         --platform "$DOCKER_ARCH" \
+        --build-arg "TARGETPLATFORM=${DOCKER_ARCH}" \
         -t "${MIDDLEWARE_REPOSITORY}:${MIDDLEWARE_VERSION}" \
         "$MIDDLEWARE_BUILD_CONTEXT"
 
