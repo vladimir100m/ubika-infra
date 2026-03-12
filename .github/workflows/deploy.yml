@@ -158,8 +158,8 @@ jobs:
 
   postbuild:
     name: "[${{ matrix.layer }}] Postbuild"
-    # needs: [changes, deploy]
-    # if: ${{ always() && needs.changes.outputs.layers != '[]' }}
+    needs: [changes, deploy]
+    if: ${{ always() && needs.changes.outputs.layers != '[]' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
