@@ -12,7 +12,7 @@ set -euo pipefail
 LAYER_DIR="$1"
 BASE_SHA="${2:-}"
 HEAD_SHA="${3:-}"
-ARCH="x86"
+# ARCH="x86"
 
 is_valid_commit() {
   local sha="$1"
