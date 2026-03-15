@@ -42,3 +42,15 @@ variable "use_route53" {
   type        = bool
   default     = false
 }
+
+variable "enable_nat_gateway" {
+  description = "Whether to create a NAT Gateway"
+  type        = bool
+  default     = true
+}
+
+variable "single_nat_gateway" {
+  description = "If true, a single NAT Gateway will be shared across all private subnets. If false, one will be created per AZ."
+  type        = bool
+  default     = true
+}

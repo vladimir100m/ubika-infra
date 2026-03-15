@@ -5,6 +5,11 @@ locals {
   final_vpc_id     = local.creating_new_vpc ? aws_vpc.new[0].id : data.aws_vpc.existing[0].id
 }
 
+locals {
+  creating_new_vpc = var.vpc_id == ""
+  nat_gateway_count = var.disable_outbound_network_access || !var.enable_nat_gateway ? 0 : (var.single_nat_gateway ? 1 : 2)
+}
+
 data "aws_subnets" "public_ip_subnets" {
   filter {
     name   = "vpc-id"
