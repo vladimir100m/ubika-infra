@@ -318,6 +318,16 @@ resource "aws_security_group" "ecs_task" {
   }
 }
 
+resource "aws_security_group_rule" "ecs_task_ingress_8000" {
+  type                     = "ingress"
+  from_port                = 8000
+  to_port                  = 8000
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.ecs_task.id
+  source_security_group_id = module.alb.alb_security_group_id
+  description              = "Allow ALB to FastAPI Agent containers"
+}
+
 resource "aws_security_group_rule" "ecs_task_ingress_4000" {
   type                     = "ingress"
   from_port                = 4000
@@ -357,6 +367,31 @@ resource "aws_security_group_rule" "rds_ingress_from_ecs" {
   security_group_id        = module.rds.security_group_id
   source_security_group_id = aws_security_group.ecs_task.id
   description              = "Allow ECS tasks to RDS"
+}
+
+# This is how Repo B (CDK) knows where to deploy without hardcoding.
+resource "aws_ssm_parameter" "vpc_id" {
+  name  = "/ubika/${var.environment}/vpc_id"
+  type  = "String"
+  value = local.networking_vpc_id
+}
+
+resource "aws_ssm_parameter" "alb_listener_arn" {
+  name  = "/ubika/${var.environment}/alb_https_listener_arn"
+  type  = "String"
+  value = module.alb.https_listener_arn
+}
+
+resource "aws_ssm_parameter" "alb_sg_id" {
+  name  = "/ubika/${var.environment}/alb_security_group_id"
+  type  = "String"
+  value = module.alb.alb_security_group_id
+}
+
+resource "aws_ssm_parameter" "private_subnets" {
+  name  = "/ubika/${var.environment}/private_subnet_ids"
+  type  = "StringList"
+  value = join(",", data.terraform_remote_state.networking.outputs.private_subnet_ids)
 }
 
 # ── IAM: Task Role inline policy ─────────────────────────────────────────────
