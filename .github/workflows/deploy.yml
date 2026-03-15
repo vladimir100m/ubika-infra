@@ -78,31 +78,43 @@ jobs:
             if grep -q '^modules/' <<< "$CHANGED_FILES"; then
               LAYERS=$(find live -type f -name main.tf | sed 's|/main.tf$||' | sed 's|^live/||')
             else
-              LAYERS=$(echo "$CHANGED_FILES" | grep '^live/' | while read -r file; do
-                dir="$file"
-                while [[ "$dir" != "." ]]; do
-                  dir=$(dirname "$dir")
-                  [[ -f "$dir/main.tf" ]] && echo "${dir#live/}" && break
-                done
-              done | sort -u)
+              LAYERS=$(echo "$CHANGED_FILES" | grep '^live/' || true)
+              if [[ -n "$LAYERS" ]]; then
+                LAYERS=$(echo "$LAYERS" | while read -r file; do
+                  dir="$file"
+                  while [[ "$dir" != "." ]]; do
+                    dir=$(dirname "$dir")
+                    [[ -f "$dir/main.tf" ]] && echo "${dir#live/}" && break
+                  done
+                done | sort -u)
+              fi
             fi
           fi
 
-          # Ordering: 10=Network, 20=IAM, 30=Data, 50=Infra/LiteLLM, 60=Agents
-          ORDERED=$(printf '%s\n' "$LAYERS" | awk '
-            /networking/ { print "10_" $0 }
-            /iam/        { print "20_" $0 }
-            /rds|redis/  { print "30_" $0 }
-            /litellm/    { print "50_" $0 }
-            /agents/     { print "60_" $0 }
-            !/networking|iam|rds|redis|litellm|agents/ { print "90_" $0 }
-          ' | sort | cut -d'_' -f2-)
+          # Handle empty LAYERS properly
+          if [[ -z "$LAYERS" ]]; then
+            ORDERED=""
+          else
+            # Ordering: 10=Network, 20=IAM, 30=Data, 50=Infra/LiteLLM, 60=Agents
+            ORDERED=$(printf '%s\n' "$LAYERS" | awk '
+              /networking/ { print "10_" $0 }
+              /iam/        { print "20_" $0 }
+              /rds|redis/  { print "30_" $0 }
+              /litellm/    { print "50_" $0 }
+              /agents/     { print "60_" $0 }
+              !/networking|iam|rds|redis|litellm|agents/ { print "90_" $0 }
+            ' | sort | cut -d'_' -f2-)
+          fi
 
           L_JSON=$(printf '%s\n' "$ORDERED" | jq -R -s -c 'split("\n") | map(select(length > 0))')
           FINAL_L=$(jq -c --argjson ex '${{ env.DEPLOY_EXCLUDE_LAYERS }}' 'map(select((. as $l | ($ex | index($l))) | not))' <<< "$L_JSON")
 
           # Folders for Docker build
-          F_JSON=$(printf '%s\n' "$ORDERED" | awk -F'/' '{print "live/"$1"/"$2}' | sort -u | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          if [[ -z "$ORDERED" ]]; then
+            F_JSON="[]"
+          else
+            F_JSON=$(printf '%s\n' "$ORDERED" | awk -F'/' '{print "live/"$1"/"$2}' | sort -u | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          fi
 
           echo "has_changes=$([[ "$FINAL_L" != "[]" ]] && echo "1" || echo "0")" >> "$GITHUB_OUTPUT"
           echo "layers=$FINAL_L" >> "$GITHUB_OUTPUT"
