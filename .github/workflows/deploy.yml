@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       layer:
-        description: "Optional Terraform layer override (e.g. production/networking)."
+        description: "Optional layer override (e.g. production/networking)"
         required: false
         default: ""
 
@@ -38,7 +38,7 @@ concurrency:
 
 jobs:
   changes:
-    name: Detect changed folders and layers
+    name: Detect Changes
     runs-on: ubuntu-latest
     outputs:
       has_changes: ${{ steps.detect.outputs.has_changes }}
@@ -58,71 +58,106 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Helper to find all valid layers
-          all_layers() {
-            find live -type f -name main.tf -print | sed 's|/main.tf$||' | sed 's|^live/||' | sort -u
-          }
-
-          # Logic to determine commit range
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             BASE_SHA="${{ github.event.pull_request.base.sha }}"
           else
             BASE_SHA="${{ github.event.before }}"
-            # Fallback for first push or deleted history
             if [[ "$BASE_SHA" == "0000000000000000000000000000000000000000" ]]; then
               BASE_SHA=$(git rev-list --max-parents=0 HEAD | tail -n1)
             fi
           fi
           HEAD_SHA="${{ github.sha }}"
 
-          # Identify Changed Layers
+          # Identification logic
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.layer }}" ]]; then
             LAYERS="${{ inputs.layer }}"
             LAYERS="${LAYERS#live/}"
           else
             CHANGED_FILES="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
             if grep -q '^modules/' <<< "$CHANGED_FILES"; then
-              LAYERS="$(all_layers)"
+              LAYERS=$(find live -type f -name main.tf | sed 's|/main.tf$||' | sed 's|^live/||')
             else
-              # Find unique directories containing main.tf relative to changed files
-              LAYERS=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep '^live/' | while read -r file; do
+              LAYERS=$(echo "$CHANGED_FILES" | grep '^live/' | while read -r file; do
                 dir="$file"
-                while [[ "$dir" != "." && "$dir" != "/" ]]; do
+                while [[ "$dir" != "." ]]; do
                   dir=$(dirname "$dir")
-                  if [[ -f "$dir/main.tf" ]]; then
-                    echo "${dir#live/}"
-                    break
-                  fi
+                  [[ -f "$dir/main.tf" ]] && echo "${dir#live/}" && break
                 done
               done | sort -u)
             fi
           fi
 
-          # --- CRITICAL: ORDERING LOGIC ---
-          # We prefix layers with numbers to force the sort order: Networking -> IAM -> RDS/Redis -> Infra
-          ORDERED_LAYERS=$(printf '%s\n' "$LAYERS" | awk '
+          # Ordering: 10=Network, 20=IAM, 30=Data, 50=Infra/LiteLLM, 60=Agents
+          ORDERED=$(printf '%s\n' "$LAYERS" | awk '
             /networking/ { print "10_" $0 }
             /iam/        { print "20_" $0 }
-            /rds|postgres|redis|elasticache/ { print "30_" $0 }
-            /litellm\/infra/ { print "50_" $0 }
+            /rds|redis/  { print "30_" $0 }
+            /litellm/    { print "50_" $0 }
             /agents/     { print "60_" $0 }
-            !/networking|iam|rds|postgres|redis|elasticache|litellm|agents/ { print "90_" $0 }
+            !/networking|iam|rds|redis|litellm|agents/ { print "90_" $0 }
           ' | sort | cut -d'_' -f2-)
 
-          # Filter out exclusions and convert to JSON
-          LAYERS_JSON=$(printf '%s\n' "$ORDERED_LAYERS" | jq -R -s -c 'split("\n") | map(select(length > 0))')
-          FINAL_LAYERS=$(jq -c --argjson exclude '${{ env.DEPLOY_EXCLUDE_LAYERS }}' 'map(select((. as $layer | ($exclude | index($layer))) | not))' <<< "$LAYERS_JSON")
+          L_JSON=$(printf '%s\n' "$ORDERED" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          FINAL_L=$(jq -c --argjson ex '${{ env.DEPLOY_EXCLUDE_LAYERS }}' 'map(select((. as $l | ($ex | index($l))) | not))' <<< "$L_JSON")
 
-          # Output folders for Docker job (simplified to top-level dirs)
-          FOLDERS_JSON=$(printf '%s\n' "$ORDERED_LAYERS" | awk -F'/' '{print "live/"$1"/"$2}' | sort -u | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          # Folders for Docker build
+          F_JSON=$(printf '%s\n' "$ORDERED" | awk -F'/' '{print "live/"$1"/"$2}' | sort -u | jq -R -s -c 'split("\n") | map(select(length > 0))')
 
-          echo "has_changes=$([[ "$FINAL_LAYERS" != "[]" ]] && echo "1" || echo "0")" >> "$GITHUB_OUTPUT"
-          echo "layers=$FINAL_LAYERS" >> "$GITHUB_OUTPUT"
-          echo "folders=$FOLDERS_JSON" >> "$GITHUB_OUTPUT"
+          echo "has_changes=$([[ "$FINAL_L" != "[]" ]] && echo "1" || echo "0")" >> "$GITHUB_OUTPUT"
+          echo "layers=$FINAL_L" >> "$GITHUB_OUTPUT"
+          echo "folders=$F_JSON" >> "$GITHUB_OUTPUT"
           echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
           echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
+  docker:
+    name: Build Docker
+    needs: changes
+    if: ${{ needs.changes.outputs.has_changes == '1' && needs.changes.outputs.folders != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        folder: ${{ fromJSON(needs.changes.outputs.folders) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and Push
+        shell: bash
+        run: |
+          if [[ -f "${{ matrix.folder }}/Dockerfile" ]]; then
+            echo "Dockerfile found in ${{ matrix.folder }}, building..."
+            # Add your ECR push logic here or call your script
+            # bash .github/scripts/postbuild-check.sh "${{ matrix.folder }}"
+          else
+            echo "No Dockerfile in ${{ matrix.folder }}, skipping."
+          fi
+
   terraform:
-    name: "[${{ matrix.layer }}] Terraform"
+    name: TF [${{ matrix.layer }}]
     needs: changes
     if: ${{ needs.changes.outputs.layers != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        layer: ${{ fromJSON(needs.changes.outputs.layers) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: bash scripts/deploy.sh terraform-init "${{ matrix.layer }}"
+
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main'
+        run: bash scripts/deploy.sh terraform-apply "${{ matrix.layer }}"
