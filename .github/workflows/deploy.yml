@@ -31,10 +31,11 @@ permissions:
 env:
   AWS_REGION: us-east-1
   DEPLOY_EXCLUDE_LAYERS: '["production/litellm/bootstrap"]'
+  TF_IN_AUTOMATION: "1"
 
 concurrency:
   group: terraform-infra-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   changes:
@@ -157,6 +158,9 @@ jobs:
 
       - name: Terraform Init
         run: bash scripts/deploy.sh terraform-init "${{ matrix.layer }}"
+
+      - name: Terraform Plan
+        run: bash scripts/deploy.sh terraform-plan "${{ matrix.layer }}"
 
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main'
