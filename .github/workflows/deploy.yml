@@ -7,7 +7,6 @@ on:
       - live/**
       - modules/**
       - .github/workflows/deploy.yml
-      - .github/workflows/deploy.yaml
       - .github/scripts/**
       - scripts/deploy.sh
   pull_request:
@@ -16,13 +15,12 @@ on:
       - live/**
       - modules/**
       - .github/workflows/deploy.yml
-      - .github/workflows/deploy.yaml
       - .github/scripts/**
       - scripts/deploy.sh
   workflow_dispatch:
     inputs:
       layer:
-        description: "Optional Terraform layer override (e.g. _global, production/networking, production/litellm/infra)."
+        description: "Optional Terraform layer override (e.g. production/networking)."
         required: false
         default: ""
 
@@ -32,8 +30,6 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
-  # JSON array of layer paths (relative to live/) that must be excluded from deploy matrix.
-  # Example: ["production/litellm/bootstrap"]
   DEPLOY_EXCLUDE_LAYERS: '["production/litellm/bootstrap"]'
 
 concurrency:
@@ -56,238 +52,77 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Detect changed folders/layers
+      - name: Detect and Order Layers
         id: detect
         shell: bash
         run: |
           set -euo pipefail
 
-          is_valid_commit() {
-            local sha="$1"
-            [[ -n "$sha" ]] && git cat-file -e "${sha}^{commit}" 2>/dev/null
-          }
-
+          # Helper to find all valid layers
           all_layers() {
-            find live -type f -name main.tf -print \
-              | sed 's|/main.tf$||' \
-              | sed 's|^live/||' \
-              | sort -u
+            find live -type f -name main.tf -print | sed 's|/main.tf$||' | sed 's|^live/||' | sort -u
           }
 
-          nearest_layer_for_path() {
-            local path="$1"
-            local dir
-            dir="$(dirname "$path")"
-
-            while [[ "$dir" == live* && "$dir" != "live" ]]; do
-              if [[ -f "$dir/main.tf" ]]; then
-                echo "${dir#live/}"
-                return 0
-              fi
-              dir="$(dirname "$dir")"
-            done
-
-            return 1
-          }
-
-          descendant_layers_for_dir() {
-            local dir="$1"
-            [[ -d "$dir" ]] || return 0
-
-            find "$dir" -type f -name main.tf -print \
-              | sed 's|/main.tf$||' \
-              | sed 's|^live/||' \
-              | sort -u
-          }
-
-          folder_for_live_path() {
-            local path="$1"
-            local rel
-            rel="${path#live/}"
-
-            if [[ "$rel" == _global/* || "$rel" == "_global" ]]; then
-              echo "live/_global"
-              return 0
-            fi
-
-            IFS='/' read -r seg1 seg2 _ <<< "$rel"
-            if [[ -n "${seg1:-}" && -n "${seg2:-}" ]]; then
-              echo "live/${seg1}/${seg2}"
-            elif [[ -n "${seg1:-}" ]]; then
-              echo "live/${seg1}"
-            fi
-          }
-
+          # Logic to determine commit range
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             BASE_SHA="${{ github.event.pull_request.base.sha }}"
           else
             BASE_SHA="${{ github.event.before }}"
+            # Fallback for first push or deleted history
+            if [[ "$BASE_SHA" == "0000000000000000000000000000000000000000" ]]; then
+              BASE_SHA=$(git rev-list --max-parents=0 HEAD | tail -n1)
+            fi
           fi
-
           HEAD_SHA="${{ github.sha }}"
 
-          if ! is_valid_commit "$BASE_SHA"; then
-            BASE_SHA="$(git rev-list --max-parents=0 HEAD | tail -n1)"
-          fi
-
-          if ! is_valid_commit "$HEAD_SHA"; then
-            HEAD_SHA="$(git rev-parse HEAD)"
-          fi
-
-          MANUAL_LAYER="${{ inputs.layer }}"
-
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "$MANUAL_LAYER" ]]; then
-            LAYER_NO_PREFIX="${MANUAL_LAYER#live/}"
-            FOLDER_REL="$(echo "$LAYER_NO_PREFIX" | awk -F'/' '{if ($1=="_global") print "_global"; else print $1"/"$2}')"
-
-            FOLDERS_JSON="[\"live/${FOLDER_REL}\"]"
-            LAYERS_JSON="[\"${LAYER_NO_PREFIX}\"]"
+          # Identify Changed Layers
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.layer }}" ]]; then
+            LAYERS="${{ inputs.layer }}"
+            LAYERS="${LAYERS#live/}"
           else
             CHANGED_FILES="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
-
-            FOLDERS="$({
-              while IFS= read -r file; do
-                [[ -z "$file" ]] && continue
-                [[ "$file" != live/* ]] && continue
-                folder_for_live_path "$file"
-              done <<< "$CHANGED_FILES"
-            } | sort -u)"
-
             if grep -q '^modules/' <<< "$CHANGED_FILES"; then
               LAYERS="$(all_layers)"
             else
-              LAYERS="$({
-                while IFS= read -r file; do
-                  [[ -z "$file" ]] && continue
-                  [[ "$file" != live/* ]] && continue
-                  layer="$(nearest_layer_for_path "$file" || true)"
-                  if [[ -n "$layer" ]]; then
-                    echo "$layer"
-                  else
-                    descendant_layers_for_dir "$(dirname "$file")"
+              # Find unique directories containing main.tf relative to changed files
+              LAYERS=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep '^live/' | while read -r file; do
+                dir="$file"
+                while [[ "$dir" != "." && "$dir" != "/" ]]; do
+                  dir=$(dirname "$dir")
+                  if [[ -f "$dir/main.tf" ]]; then
+                    echo "${dir#live/}"
+                    break
                   fi
-                done <<< "$CHANGED_FILES"
-              } | sort -u)"
+                done
+              done | sort -u)
             fi
-
-            FOLDERS_JSON="$(printf '%s\n' "$FOLDERS" | jq -R -s -c 'split("\n") | map(select(length > 0))')"
-            LAYERS_JSON_RAW="$(printf '%s\n' "$LAYERS" | jq -R -s -c 'split("\n") | map(select(length > 0))')"
-            LAYERS_JSON="$(jq -c --argjson exclude '${{ env.DEPLOY_EXCLUDE_LAYERS }}' 'map(select((. as $layer | ($exclude | index($layer))) | not))' <<< "$LAYERS_JSON_RAW")"
           fi
 
-          if [[ "$FOLDERS_JSON" == "[]" && "$LAYERS_JSON" == "[]" ]]; then
-            HAS_CHANGES="0"
-          else
-            HAS_CHANGES="1"
-          fi
+          # --- CRITICAL: ORDERING LOGIC ---
+          # We prefix layers with numbers to force the sort order: Networking -> IAM -> RDS/Redis -> Infra
+          ORDERED_LAYERS=$(printf '%s\n' "$LAYERS" | awk '
+            /networking/ { print "10_" $0 }
+            /iam/        { print "20_" $0 }
+            /rds|postgres|redis|elasticache/ { print "30_" $0 }
+            /litellm\/infra/ { print "50_" $0 }
+            /agents/     { print "60_" $0 }
+            !/networking|iam|rds|postgres|redis|elasticache|litellm|agents/ { print "90_" $0 }
+          ' | sort | cut -d'_' -f2-)
 
-          echo "has_changes=$HAS_CHANGES" >> "$GITHUB_OUTPUT"
+          # Filter out exclusions and convert to JSON
+          LAYERS_JSON=$(printf '%s\n' "$ORDERED_LAYERS" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          FINAL_LAYERS=$(jq -c --argjson exclude '${{ env.DEPLOY_EXCLUDE_LAYERS }}' 'map(select((. as $layer | ($exclude | index($layer))) | not))' <<< "$LAYERS_JSON")
+
+          # Output folders for Docker job (simplified to top-level dirs)
+          FOLDERS_JSON=$(printf '%s\n' "$ORDERED_LAYERS" | awk -F'/' '{print "live/"$1"/"$2}' | sort -u | jq -R -s -c 'split("\n") | map(select(length > 0))')
+
+          echo "has_changes=$([[ "$FINAL_LAYERS" != "[]" ]] && echo "1" || echo "0")" >> "$GITHUB_OUTPUT"
+          echo "layers=$FINAL_LAYERS" >> "$GITHUB_OUTPUT"
           echo "folders=$FOLDERS_JSON" >> "$GITHUB_OUTPUT"
-          echo "layers=$LAYERS_JSON" >> "$GITHUB_OUTPUT"
           echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
           echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
-
-  docker:
-    name: "[${{ matrix.folder }}] Docker build/push"
-    needs: changes
-    if: ${{ needs.changes.outputs.has_changes == '1' && needs.changes.outputs.folders != '[]' }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        folder: ${{ fromJSON(needs.changes.outputs.folders) }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Check Dockerfile
-        id: docker
-        shell: bash
-        run: |
-          if [[ -f "${{ matrix.folder }}/Dockerfile" ]]; then
-            echo "has_dockerfile=1" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_dockerfile=0" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Configure AWS credentials (OIDC)
-        if: ${{ steps.docker.outputs.has_dockerfile == '1' }}
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Build and push image(s)
-        if: ${{ steps.docker.outputs.has_dockerfile == '1' }}
-        shell: bash
-        run: bash .github/scripts/postbuild-check.sh "${{ matrix.folder }}"
 
   terraform:
     name: "[${{ matrix.layer }}] Terraform"
     needs: changes
     if: ${{ needs.changes.outputs.layers != '[]' }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        layer: ${{ fromJSON(needs.changes.outputs.layers) }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Compute deploy gate
-        id: gate
-        shell: bash
-        run: |
-          if [[ -d "${{ matrix.layer }}" ]]; then
-            LAYER_DIR="${{ matrix.layer }}"
-          else
-            LAYER_DIR="live/${{ matrix.layer }}"
-          fi
-
-          bash .github/scripts/prebuild-check.sh \
-            "$LAYER_DIR" \
-            "${{ needs.changes.outputs.base_sha }}" \
-            "${{ needs.changes.outputs.head_sha }}" > prebuild_output.txt
-
-          TF_CHANGED=$(grep '^TF_CHANGED=' prebuild_output.txt | cut -d'=' -f2 | xargs)
-          FORCE_DEPLOY=$(grep '^FORCE_DEPLOY=' prebuild_output.txt | cut -d'=' -f2 | xargs)
-          ARCH=$(grep '^ARCH=' prebuild_output.txt | cut -d'=' -f2 | xargs)
-
-          if [[ "${TF_CHANGED:-0}" == "1" || "${FORCE_DEPLOY:-0}" == "1" ]]; then
-            echo "should_deploy=1" >> "$GITHUB_OUTPUT"
-          else
-            echo "should_deploy=0" >> "$GITHUB_OUTPUT"
-          fi
-          echo "arch=${ARCH:-x86}" >> "$GITHUB_OUTPUT"
-
-      - name: Configure AWS credentials (OIDC)
-        if: ${{ steps.gate.outputs.should_deploy == '1' }}
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Setup Terraform
-        if: ${{ steps.gate.outputs.should_deploy == '1' }}
-        uses: hashicorp/setup-terraform@v3
-
-      - name: Init (terraform init)
-        if: ${{ steps.gate.outputs.should_deploy == '1' }}
-        run: bash scripts/deploy.sh terraform-init "${{ matrix.layer }}"
-
-      - name: Build (terraform plan)
-        if: ${{ steps.gate.outputs.should_deploy == '1' }}
-        env:
-          TF_VAR_architecture: ${{ steps.gate.outputs.arch }}
-          TF_VAR_manage_github_actions_role_policy: ${{ matrix.layer == '_global' && 'true' || 'false' }}
-        run: bash scripts/deploy.sh terraform-plan "${{ matrix.layer }}"
-
-      - name: Deploy (terraform apply)
-        if: ${{ steps.gate.outputs.should_deploy == '1' && github.ref == 'refs/heads/main' && github.event_name == 'push' }}
-        env:
-          TF_VAR_architecture: ${{ steps.gate.outputs.arch }}
-          TF_VAR_manage_github_actions_role_policy: ${{ matrix.layer == '_global' && 'true' || 'false' }}
-        run: bash scripts/deploy.sh terraform-apply "${{ matrix.layer }}"
