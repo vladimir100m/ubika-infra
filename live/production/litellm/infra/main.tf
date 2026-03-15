@@ -394,6 +394,12 @@ resource "aws_ssm_parameter" "private_subnets" {
   value = join(",", data.terraform_remote_state.networking.outputs.private_subnet_ids)
 }
 
+resource "aws_ssm_parameter" "litellm_url" {
+  name  = "/ubika/${var.environment}/litellm_url"
+  type  = "String"
+  value = var.use_cloudfront ? "https://${module.cdn[0].domain_name}" : "https://${module.alb.alb_dns_name}"
+}
+
 # ── IAM: Task Role inline policy ─────────────────────────────────────────────
 
 data "aws_iam_policy_document" "task_role" {
