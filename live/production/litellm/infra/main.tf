@@ -394,6 +394,12 @@ resource "aws_ssm_parameter" "private_subnets" {
   value = join(",", data.terraform_remote_state.networking.outputs.private_subnet_ids)
 }
 
+resource "aws_ssm_parameter" "litellm_url" {
+  name  = "/ubika/${var.environment}/litellm_url"
+  type  = "String"
+  value = var.use_cloudfront ? "https://${module.cdn[0].domain_name}" : "https://${module.alb.alb_dns_name}"
+}
+
 # ── IAM: Task Role inline policy ─────────────────────────────────────────────
 
 data "aws_iam_policy_document" "task_role" {
@@ -431,14 +437,10 @@ data "aws_iam_policy_document" "task_role" {
   }
 }
 
-resource "aws_iam_policy" "task_role" {
+resource "aws_iam_role_policy" "task_role" {
   name   = "${var.name}-litellm-task-policy"
+  role   = module.iam.task_role_name
   policy = data.aws_iam_policy_document.task_role.json
-}
-
-resource "aws_iam_role_policy_attachment" "task_role_custom" {
-  role       = module.iam.task_role_name
-  policy_arn = aws_iam_policy.task_role.arn
 }
 
 # ── Container definitions (LiteLLM + Middleware) ──────────────────────────────

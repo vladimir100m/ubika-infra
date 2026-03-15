@@ -61,10 +61,20 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
           "iam:TagRole",
           "iam:UntagRole",
           "iam:UpdateAssumeRolePolicy",
+          "iam:CreatePolicy",
+          "iam:DeletePolicy",
+          "iam:GetPolicy",
+          "iam:GetPolicyVersion",
+          "iam:ListPolicyVersions",
+          "iam:CreatePolicyVersion",
+          "iam:DeletePolicyVersion",
+          "iam:TagPolicy",
+          "iam:UntagPolicy",
         ]
         Resource = [
           "arn:aws:iam::703544859494:role/cdk-*",
           "arn:aws:iam::703544859494:role/genai-gateway-*",
+          "arn:aws:iam::703544859494:policy/genai-gateway-*",
         ]
       },
       # ── iam:PassRole – scoped to VPC Flow Logs only ─────────────────────
