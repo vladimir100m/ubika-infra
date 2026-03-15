@@ -437,14 +437,10 @@ data "aws_iam_policy_document" "task_role" {
   }
 }
 
-resource "aws_iam_policy" "task_role" {
+resource "aws_iam_role_policy" "task_role" {
   name   = "${var.name}-litellm-task-policy"
+  role   = module.iam.task_role_name
   policy = data.aws_iam_policy_document.task_role.json
-}
-
-resource "aws_iam_role_policy_attachment" "task_role_custom" {
-  role       = module.iam.task_role_name
-  policy_arn = aws_iam_policy.task_role.arn
 }
 
 # ── Container definitions (LiteLLM + Middleware) ──────────────────────────────
