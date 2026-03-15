@@ -16,15 +16,17 @@ resource "aws_internet_gateway" "this" {
 }
 
 resource "aws_eip" "nat" {
-  count  = (local.creating_new_vpc && local.nat_gateway_count == 1) ? 1 : 0
+  count  = local.creating_new_vpc ? local.nat_gateway_count : 0
   domain = "vpc"
+  tags   = { Name = "${var.name}-nat-eip-${count.index}" }
 }
 
 resource "aws_nat_gateway" "this" {
-  count         = (local.creating_new_vpc && local.nat_gateway_count == 1) ? 1 : 0
-  allocation_id = aws_eip.nat[0].id
-  subnet_id     = aws_subnet.public[0].id
+  count         = local.creating_new_vpc ? local.nat_gateway_count : 0
+  allocation_id = aws_eip.nat[count.index].id
+  subnet_id     = aws_subnet.public[count.index].id
   depends_on    = [aws_internet_gateway.this]
+  tags          = { Name = "${var.name}-nat-gw-${count.index}" }
 }
 
 resource "aws_subnet" "public" {
@@ -53,15 +55,12 @@ resource "aws_route_table" "public" {
 }
 
 resource "aws_route_table" "private_with_nat" {
-  count  = local.creating_new_vpc && (local.nat_gateway_count == 1) ? 1 : 0
+  count  = local.creating_new_vpc ? local.nat_gateway_count : 0
   vpc_id = aws_vpc.new[0].id
 
   route {
     cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.this[0].id
-  }
-  lifecycle {
-    ignore_changes = [route]
+    nat_gateway_id = aws_nat_gateway.this[count.index].id
   }
 }
 
@@ -80,9 +79,9 @@ resource "aws_route_table_association" "public" {
 }
 
 resource "aws_route_table_association" "private" {
-  count          = local.creating_new_vpc ? length(aws_subnet.private) : 0
-  subnet_id      = aws_subnet.private[count.index].id
-  route_table_id = local.nat_gateway_count == 1 ? aws_route_table.private_with_nat[0].id : aws_route_table.private_isolated[0].id
+  count     = local.creating_new_vpc ? length(aws_subnet.private) : 0
+  subnet_id = aws_subnet.private[count.index].id
+  route_table_id = local.nat_gateway_count > 0 ? element(aws_route_table.private_with_nat[*].id, count.index) : aws_route_table.private_isolated[0].id
 }
 
 data "aws_availability_zones" "available" {

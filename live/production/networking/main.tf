@@ -5,6 +5,9 @@ module "networking" {
   vpc_id                               = var.vpc_id
   create_vpc_endpoints_in_existing_vpc = var.create_vpc_endpoints_in_existing_vpc
   disable_outbound_network_access      = var.disable_outbound_network_access
+
+  enable_nat_gateway     = true
+  single_nat_gateway     = true
 }
 
 data "aws_subnets" "private" {
