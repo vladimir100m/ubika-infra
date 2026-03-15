@@ -99,11 +99,11 @@ case "$COMMAND" in
     ;;
   terraform-plan)
     LAYER_DIR="$(resolve_layer_dir "$LAYER")"
-    terraform -chdir="$LAYER_DIR" plan -out=tfplan
+    terraform -chdir="$LAYER_DIR" plan -out=tfplan -input=false
     ;;
   terraform-apply)
     LAYER_DIR="$(resolve_layer_dir "$LAYER")"
-    terraform -chdir="$LAYER_DIR" apply tfplan
+    terraform -chdir="$LAYER_DIR" apply -auto-approve -input=false tfplan
     ;;
   resolve-dir)
     # This is a placeholder for resolving a layer directory
