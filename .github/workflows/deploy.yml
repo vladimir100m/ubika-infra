@@ -274,6 +274,10 @@ jobs:
         if: ${{ steps.gate.outputs.should_deploy == '1' }}
         uses: hashicorp/setup-terraform@v3
 
+      - name: Init (terraform init)
+        if: ${{ steps.gate.outputs.should_deploy == '1' }}
+        run: bash scripts/deploy.sh terraform-init "${{ matrix.layer }}"
+
       - name: Build (terraform plan)
         if: ${{ steps.gate.outputs.should_deploy == '1' }}
         env:

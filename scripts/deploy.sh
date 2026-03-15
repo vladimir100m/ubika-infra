@@ -4,6 +4,7 @@ set -euo pipefail
 # Usage: scripts/deploy.sh <command> [args...]
 # Commands:
 #   detect-layers <base_sha> <head_sha>
+#   terraform-init <layer>
 #   terraform-plan <layer>
 #   terraform-apply <layer>
 #   resolve-dir <layer>
@@ -92,6 +93,10 @@ case "$COMMAND" in
       printf '%s\n' "$LAYERS" | jq -R -s -c 'split("\n") | map(select(length > 0))'
     fi
     ;;
+  terraform-init)
+    LAYER_DIR="$(resolve_layer_dir "$LAYER")"
+    terraform -chdir="$LAYER_DIR" init -reconfigure
+    ;;
   terraform-plan)
     LAYER_DIR="$(resolve_layer_dir "$LAYER")"
     terraform -chdir="$LAYER_DIR" plan -out=tfplan
@@ -107,7 +112,7 @@ case "$COMMAND" in
     ;;
   *)
     echo "Unknown command: $COMMAND"
-    echo "Usage: scripts/deploy.sh <detect-layers|terraform-plan|terraform-apply|resolve-dir> <args>"
+    echo "Usage: scripts/deploy.sh <detect-layers|terraform-init|terraform-plan|terraform-apply|resolve-dir> <args>"
     exit 1
     ;;
 esac
