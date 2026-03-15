@@ -95,7 +95,11 @@ case "$COMMAND" in
     ;;
   terraform-init)
     LAYER_DIR="$(resolve_layer_dir "$LAYER")"
-    terraform -chdir="$LAYER_DIR" init -reconfigure
+    if [[ -f "$LAYER_DIR/backend.hcl" ]]; then
+      terraform -chdir="$LAYER_DIR" init -reconfigure -backend-config=backend.hcl -input=false
+    else
+      terraform -chdir="$LAYER_DIR" init -reconfigure -input=false
+    fi
     ;;
   terraform-plan)
     LAYER_DIR="$(resolve_layer_dir "$LAYER")"
