@@ -1,18 +1,4 @@
 #!/usr/bin/env bash
-# detect-layers.sh — Detect changed Terraform layers and output them for GitHub Actions.
-#
-# Usage: detect-layers.sh <event_name> <base_sha> <head_sha> <exclude_json> [manual_layer]
-#
-#   event_name    - GitHub event name (push, pull_request, workflow_dispatch)
-#   base_sha      - Base commit SHA (used for diff)
-#   head_sha      - Head commit SHA (used for diff)
-#   exclude_json  - JSON array of layer paths to exclude (e.g. '["production/litellm/bootstrap"]')
-#   manual_layer  - (optional) Explicit layer from workflow_dispatch input; skips auto-detection
-#
-# Outputs (written to $GITHUB_OUTPUT):
-#   layers        - JSON array of layer paths to deploy
-#   base_sha      - Resolved base SHA
-#   head_sha      - Resolved head SHA
 set -euo pipefail
 
 EVENT_NAME="${1:?event_name is required}"
@@ -24,41 +10,60 @@ MANUAL_LAYER="${5:-}"
 emit_output() {
     local key="$1"
     local value="$2"
-
-    if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-        echo "${key}=${value}" >> "$GITHUB_OUTPUT"
-    fi
-
-    echo "${key}=${value}"
+    [[ -n "${GITHUB_OUTPUT:-}" ]] && echo "${key}=${value}" >> "$GITHUB_OUTPUT"
+    echo "[detect-layers] OUTPUT: ${key}=${value}"
 }
 
-echo "[detect-layers] EVENT_NAME=${EVENT_NAME}"
-echo "[detect-layers] BASE_SHA=${BASE_SHA}"
-echo "[detect-layers] HEAD_SHA=${HEAD_SHA}"
-echo "[detect-layers] EXCLUDE_LAYERS=${EXCLUDE_LAYERS}"
-echo "[detect-layers] MANUAL_LAYER=${MANUAL_LAYER:-<empty>}"
+# --- SHA RESOLUTION LOGIC ---
+# Fixes the "fatal: ambiguous argument" error
+if [[ -z "$BASE_SHA" ]] || [[ "$BASE_SHA" == "0000000000000000000000000000000000000000" ]] || ! git rev-parse --verify "$BASE_SHA" >/dev/null 2>&1; then
+    echo "[detect-layers] BASE_SHA is invalid or missing. Attempting recovery..."
+    
+    # Check if there is a parent commit
+    if git rev-parse HEAD~1 >/dev/null 2>&1; then
+        RESOLVED_BASE=$(git rev-parse HEAD~1)
+    else
+        # If it's the first commit, compare against the magic empty tree
+        RESOLVED_BASE="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+    fi
+else
+    RESOLVED_BASE="$BASE_SHA"
+fi
+
+echo "[detect-layers] RESOLVED_BASE=${RESOLVED_BASE}"
 
 filter_layers() {
     local json="$1"
+    # Ensure we handle empty/invalid JSON from the sub-script
+    if [[ -z "$json" ]] || [[ "$json" == "null" ]]; then json="[]"; fi
     jq -c --argjson exclude "${EXCLUDE_LAYERS}" '
         map(select((. as $layer | ($exclude | index($layer))) | not))
     ' <<< "$json"
 }
 
-# Manual dispatch with an explicit layer overrides auto-detection.
+# --- EXECUTION ---
 if [[ "$EVENT_NAME" == "workflow_dispatch" && -n "$MANUAL_LAYER" ]]; then
-    layers_json="[\"${MANUAL_LAYER}\"]"
-    filtered="$(filter_layers "$layers_json")"
-
-    emit_output "layers" "$filtered"
-    emit_output "base_sha" ""
-    emit_output "head_sha" "$HEAD_SHA"
-    exit 0
+    # Clean manual layer path (remove live/ prefix if user added it)
+    CLEAN_LAYER="${MANUAL_LAYER#live/}"
+    layers_json="[\"${CLEAN_LAYER}\"]"
+else
+    # Call your deployment script with the RESOLVED base
+    layers_json="$(bash scripts/deploy.sh detect-layers "${RESOLVED_BASE}" "${HEAD_SHA}")"
 fi
 
-layers_json="$(bash scripts/deploy.sh detect-layers "${BASE_SHA}" "${HEAD_SHA}")"
-filtered="$(filter_layers "$layers_json")"
+# Apply the weighted sorting we discussed earlier
+# This ensures networking -> litellm -> agents
+ORDERED_JSON=$(echo "$layers_json" | jq -c 'sort_by(
+    if contains("networking") then 1
+    elif contains("iam") then 2
+    elif (contains("rds") or contains("redis")) then 3
+    elif contains("litellm") then 5
+    elif contains("agents") then 6
+    else 9 end
+)')
+
+filtered="$(filter_layers "$ORDERED_JSON")"
 
 emit_output "layers" "$filtered"
-emit_output "base_sha" "$BASE_SHA"
+emit_output "base_sha" "$RESOLVED_BASE"
 emit_output "head_sha" "$HEAD_SHA"
