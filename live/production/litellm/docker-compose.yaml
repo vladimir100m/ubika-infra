@@ -1,0 +1,34 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: litellm
+      POSTGRES_DB: litellm
+    ports:
+      - "5432:5432"
+    volumes:
+      - litellm-db-data:/var/lib/postgresql/data
+
+  litellm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        LITELLM_VERSION: latest-stable
+    image: litellm-local:latest
+    depends_on:
+      - db
+    ports:
+      - "4000:4000"
+    env_file:
+      - .env
+    environment:
+      LITELLM_PORT: "4000"
+      DATABASE_URL: "postgresql://litellm:litellm@db:5432/litellm"
+    restart: unless-stopped
+
+volumes:
+  litellm-db-data:
