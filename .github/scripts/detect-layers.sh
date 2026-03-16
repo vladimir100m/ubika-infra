@@ -69,8 +69,19 @@ filtered="$(filter_layers "$ORDERED_JSON")"
 
 # 4. Determine Docker Folders
 if [[ "$EVENT_NAME" == "workflow_dispatch" && -n "$DOCKER_FOLDER" ]]; then
-    # Use explicit folder from UI
-    folders_json=$(jq -nc --arg f "$DOCKER_FOLDER" '[$f]')
+    # Use explicit folder from UI, but normalize to an existing path.
+    # Most repo paths are under `live/`, while users often input `production/litellm`.
+    if [[ -d "$DOCKER_FOLDER" ]]; then
+        NORMALIZED_DOCKER_FOLDER="$DOCKER_FOLDER"
+    elif [[ -d "live/$DOCKER_FOLDER" ]]; then
+        NORMALIZED_DOCKER_FOLDER="live/$DOCKER_FOLDER"
+    else
+        # Keep as-is; the downstream build step will fail with a clear error.
+        NORMALIZED_DOCKER_FOLDER="$DOCKER_FOLDER"
+        echo "[detect-layers] WARNING: docker_folder '$DOCKER_FOLDER' not found (also tried 'live/$DOCKER_FOLDER')"
+    fi
+
+    folders_json=$(jq -nc --arg f "$NORMALIZED_DOCKER_FOLDER" '[$f]')
 elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$FORCE_DOCKER" == "true" ]]; then
     # Force build all potential targets
     folders_json=$(find live -maxdepth 3 -name 'Dockerfile' -o -name '.postbuild.sh' | awk -F'/' '{print $1"/"$2"/"$3}' | sort -u | jq -R -s -c 'split("\n") | map(select(length > 0))')

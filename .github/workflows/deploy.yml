@@ -28,7 +28,7 @@ on:
         required: false
         default: "false"
       docker_folder:
-        description: "Folder to build Docker image from (e.g. live/production/litellm)"
+        description: "Folder to build Docker image from (e.g. live/production/litellm or production/litellm)"
         required: false
         default: ""
 
