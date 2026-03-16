@@ -40,7 +40,7 @@ env:
   AWS_REGION: us-east-1
   DEPLOY_EXCLUDE_LAYERS: '["production/litellm/bootstrap"]'
   TF_IN_AUTOMATION: "1"
-  LITELLM_VERSION: litellm_stable_release_branch-v1.73.0-stable
+  LITELLM_VERSION: latest-stable
   MIDDLEWARE_VERSION: latest
   CPU_ARCHITECTURE: linux/amd64
   TF_VAR_architecture: x86
