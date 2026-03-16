@@ -23,6 +23,14 @@ on:
         description: "Optional layer override (e.g. production/networking)"
         required: false
         default: ""
+      force_docker_build:
+        description: "Force Docker image build even without code changes (true/false)"
+        required: false
+        default: "false"
+      docker_folder:
+        description: "Folder to build Docker image from (e.g. live/production/litellm)"
+        required: false
+        default: ""
 
 permissions:
   id-token: write
@@ -32,6 +40,12 @@ env:
   AWS_REGION: us-east-1
   DEPLOY_EXCLUDE_LAYERS: '["production/litellm/bootstrap"]'
   TF_IN_AUTOMATION: "1"
+  # Image build defaults — must match ECS task runtime architecture
+  LITELLM_VERSION: litellm_stable_release_branch-v1.73.0-stable
+  CPU_ARCHITECTURE: linux/amd64
+  TF_VAR_architecture: x86
+  ECR_LITELLM_REPOSITORY: litellm
+  ECR_MIDDLEWARE_REPOSITORY: middleware
 
 concurrency:
   group: terraform-infra-${{ github.ref }}
@@ -47,6 +61,7 @@ jobs:
       layers: ${{ steps.detect.outputs.layers }}
       base_sha: ${{ steps.detect.outputs.base_sha }}
       head_sha: ${{ steps.detect.outputs.head_sha }}
+      cpu_architecture: ${{ steps.detect.outputs.cpu_architecture }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -109,16 +124,31 @@ jobs:
             F_JSON=$(printf '%s\n' "$ORDERED" | awk -F'/' '{print "live/"$1"/"$2}' | sort -u | jq -R -s -c 'split("\n") | map(select(length > 0))')
           fi
 
+          # workflow_dispatch: override folders when docker_folder is explicitly given
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.docker_folder }}" ]]; then
+            F_JSON=$(jq -n --arg f "${{ inputs.docker_folder }}" '[$f]')
+          fi
+
+          # workflow_dispatch: force_docker_build=true with no explicit folder → discover all .postbuild.sh targets
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.force_docker_build }}" == "true" && "$F_JSON" == "[]" ]]; then
+            F_JSON=$(find live -maxdepth 3 -name '.postbuild.sh' \
+              | awk -F'/' '{print $1"/"$2"/"$3}' | sort -u \
+              | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          fi
+
           echo "has_changes=$([[ "$FINAL_L" != "[]" ]] && echo "1" || echo "0")" >> "$GITHUB_OUTPUT"
           echo "layers=$FINAL_L" >> "$GITHUB_OUTPUT"
           echo "folders=$F_JSON" >> "$GITHUB_OUTPUT"
           echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
           echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "cpu_architecture=${TF_VAR_architecture:-x86}" >> "$GITHUB_OUTPUT"
 
   docker:
     name: Build Docker
     needs: changes
-    if: ${{ github.event_name != 'pull_request' && needs.changes.outputs.has_changes == '1' && needs.changes.outputs.folders != '[]' }}
+    if: >-
+      github.event_name != 'pull_request' &&
+      needs.changes.outputs.folders != '[]'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -141,6 +171,14 @@ jobs:
 
       - name: Build and Push
         shell: bash
+        env:
+          LITELLM_VERSION: ${{ env.LITELLM_VERSION }}
+          CPU_ARCHITECTURE: ${{ env.CPU_ARCHITECTURE }}
+          TF_VAR_architecture: ${{ env.TF_VAR_architecture }}
+          ECR_LITELLM_REPOSITORY: ${{ env.ECR_LITELLM_REPOSITORY }}
+          ECR_MIDDLEWARE_REPOSITORY: ${{ env.ECR_MIDDLEWARE_REPOSITORY }}
+          BUILD_FROM_SOURCE: "false"
+          ENABLE_MIDDLEWARE: "false"
         run: |
           if [[ -f "${{ matrix.folder }}/.postbuild.sh" || -f "${{ matrix.folder }}/Dockerfile" ]]; then
             echo "Container build context found in ${{ matrix.folder }}, building..."
@@ -178,8 +216,12 @@ jobs:
         run: bash scripts/deploy.sh terraform-init "${{ matrix.layer }}"
 
       - name: Terraform Plan
+        env:
+          TF_VAR_architecture: ${{ needs.changes.outputs.cpu_architecture }}
         run: bash scripts/deploy.sh terraform-plan "${{ matrix.layer }}"
 
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main'
+        env:
+          TF_VAR_architecture: ${{ needs.changes.outputs.cpu_architecture }}
         run: bash scripts/deploy.sh terraform-apply "${{ matrix.layer }}"
