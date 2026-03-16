@@ -14,7 +14,7 @@ LITELLM_REPOSITORY="${APP_NAME:-${ECR_LITELLM_REPOSITORY:-litellm}}"
 MIDDLEWARE_REPOSITORY="${ECR_MIDDLEWARE_REPOSITORY:-middleware}"
 BUILD_FROM_SOURCE="$(echo "${BUILD_FROM_SOURCE:-false}" | tr '[:upper:]' '[:lower:]')"
 ENABLE_MIDDLEWARE="$(echo "${ENABLE_MIDDLEWARE:-${TF_VAR_enable_middleware:-false}}" | tr '[:upper:]' '[:lower:]')"
-AWS_REGION="${AWS_REGION}"
+AWS_REGION="${AWS_REGION:-}"
 LITELLM_VERSION="${LITELLM_VERSION:-${TF_VAR_litellm_version:-litellm_stable_release_branch-v1.73.0-stable}}"
 MIDDLEWARE_VERSION="${MIDDLEWARE_VERSION:-${TF_VAR_middleware_version:-latest}}"
 CPU_ARCHITECTURE="${CPU_ARCHITECTURE:-${DOCKER_ARCH:-linux/amd64}}"
@@ -23,12 +23,44 @@ normalize_bool() {
     echo "$1" | tr '[:upper:]' '[:lower:]'
 }
 
+require_command() {
+    local command_name="$1"
+
+    if ! command -v "$command_name" >/dev/null 2>&1; then
+        echo "Required command not found: $command_name"
+        exit 1
+    fi
+}
+
+normalize_docker_arch() {
+    case "$1" in
+        x86|x86_64|amd64|linux/amd64)
+            echo "linux/amd64"
+            ;;
+        arm|arm64|aarch64|linux/arm64)
+            echo "linux/arm64"
+            ;;
+        *)
+            echo "$1"
+            ;;
+    esac
+}
+
+require_command aws
+require_command docker
+require_command jq
+
+if [[ -z "$AWS_REGION" ]]; then
+    echo "AWS_REGION must be set via .env, workflow env, or shell environment"
+    exit 1
+fi
+
 if [[ "$LITELLM_VERSION" == "placeholder" ]]; then
     echo "LITELLM_VERSION must be set via .env, TF_VAR_litellm_version, or environment variables"
     exit 1
 fi
 
-DOCKER_ARCH="$CPU_ARCHITECTURE"
+DOCKER_ARCH="$(normalize_docker_arch "$CPU_ARCHITECTURE")"
 TERRAFORM_ARCHITECTURE="${TF_VAR_architecture:-x86}"
 
 case "$DOCKER_ARCH" in
@@ -83,6 +115,11 @@ prepare_build_context() {
     curl -fsSL "https://github.com/BerriAI/litellm/archive/refs/tags/${LITELLM_VERSION}.tar.gz" \
         | tar -xz -C litellm-source --strip-components=1
     LITELLM_BUILD_CONTEXT="litellm-source"
+
+    if [[ ! -f "$LITELLM_BUILD_CONTEXT/Dockerfile" ]]; then
+        echo "BUILD_FROM_SOURCE=true but no Dockerfile found in $LITELLM_BUILD_CONTEXT. Set BUILD_FROM_SOURCE=false or provide a Dockerfile."
+        exit 1
+    fi
 }
 
 publish_environment() {
