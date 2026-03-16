@@ -76,7 +76,7 @@ jobs:
             "${{ github.event_name }}" \
             "${{ github.event.before || '' }}" \
             "${{ github.sha }}" \
-            '${{ env.DEPLOY_EXCLUDE_LAYERS || "[]" }}' \
+            '${{ env.DEPLOY_EXCLUDE_LAYERS || '[]' }}' \
             "${{ github.event.inputs.layer || '' }}" \
             "${{ github.event.inputs.force_docker_build || 'false' }}" \
             "${{ github.event.inputs.docker_folder || '' }}"
