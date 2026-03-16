@@ -106,7 +106,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build and Push
-        run: bash .github/scripts/build-image.sh "${{ matrix.matrix.folder }}"
+        run: bash .github/scripts/build-image.sh "${{ matrix.folder }}"
 
   terraform:
     name: TF [${{ matrix.layer }}]
