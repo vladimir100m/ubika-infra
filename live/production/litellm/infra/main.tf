@@ -238,7 +238,6 @@ resource "aws_secretsmanager_secret" "llm_api_keys" {
 resource "aws_secretsmanager_secret_version" "llm_api_keys" {
   secret_id = aws_secretsmanager_secret.llm_api_keys.id
   secret_string = jsonencode({
-    OPENAI_API_KEY       = var.openai_api_key
     GEMINI_API_KEY       = var.gemini_api_key
   })
 }
@@ -466,27 +465,27 @@ locals {
       { name = "UI_PASSWORD", valueFrom = "${aws_secretsmanager_secret.master_salt.arn}:LITELLM_MASTER_KEY::" },
       { name = "LITELLM_SALT_KEY", valueFrom = "${aws_secretsmanager_secret.master_salt.arn}:LITELLM_SALT_KEY::" },
       { name = "REDIS_PASSWORD", valueFrom = "${aws_secretsmanager_secret.redis_auth.arn}:REDIS_PASSWORD::" },
-      { name = "OPENAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:OPENAI_API_KEY::" },
-      { name = "AZURE_OPENAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AZURE_OPENAI_API_KEY::" },
-      { name = "AZURE_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AZURE_API_KEY::" },
-      { name = "ANTHROPIC_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:ANTHROPIC_API_KEY::" },
-      { name = "GROQ_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:GROQ_API_KEY::" },
-      { name = "COHERE_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:COHERE_API_KEY::" },
-      { name = "CO_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:CO_API_KEY::" },
-      { name = "HF_TOKEN", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:HF_TOKEN::" },
-      { name = "HUGGINGFACE_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:HUGGINGFACE_API_KEY::" },
-      { name = "DATABRICKS_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:DATABRICKS_API_KEY::" },
+      # { name = "OPENAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:OPENAI_API_KEY::" },
+      # { name = "AZURE_OPENAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AZURE_OPENAI_API_KEY::" },
+      # { name = "AZURE_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AZURE_API_KEY::" },
+      # { name = "ANTHROPIC_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:ANTHROPIC_API_KEY::" },
+      # { name = "GROQ_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:GROQ_API_KEY::" },
+      # { name = "COHERE_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:COHERE_API_KEY::" },
+      # { name = "CO_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:CO_API_KEY::" },
+      # { name = "HF_TOKEN", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:HF_TOKEN::" },
+      # { name = "HUGGINGFACE_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:HUGGINGFACE_API_KEY::" },
+      # { name = "DATABRICKS_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:DATABRICKS_API_KEY::" },
       { name = "GEMINI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:GEMINI_API_KEY::" },
-      { name = "CODESTRAL_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:CODESTRAL_API_KEY::" },
-      { name = "MISTRAL_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:MISTRAL_API_KEY::" },
-      { name = "AZURE_AI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AZURE_AI_API_KEY::" },
-      { name = "NVIDIA_NIM_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:NVIDIA_NIM_API_KEY::" },
-      { name = "XAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:XAI_API_KEY::" },
-      { name = "PERPLEXITYAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:PERPLEXITYAI_API_KEY::" },
-      { name = "GITHUB_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:GITHUB_API_KEY::" },
-      { name = "DEEPSEEK_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:DEEPSEEK_API_KEY::" },
-      { name = "AI21_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AI21_API_KEY::" },
-      { name = "LANGSMITH_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:LANGSMITH_API_KEY::" },
+      # { name = "CODESTRAL_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:CODESTRAL_API_KEY::" },
+      # { name = "MISTRAL_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:MISTRAL_API_KEY::" },
+      # { name = "AZURE_AI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AZURE_AI_API_KEY::" },
+      # { name = "NVIDIA_NIM_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:NVIDIA_NIM_API_KEY::" },
+      # { name = "XAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:XAI_API_KEY::" },
+      # { name = "PERPLEXITYAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:PERPLEXITYAI_API_KEY::" },
+      # { name = "GITHUB_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:GITHUB_API_KEY::" },
+      # { name = "DEEPSEEK_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:DEEPSEEK_API_KEY::" },
+      # { name = "AI21_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AI21_API_KEY::" },
+      # { name = "LANGSMITH_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:LANGSMITH_API_KEY::" },
       { name = "LANGFUSE_SECRET_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:LANGFUSE_SECRET_KEY::" },
     ]
 

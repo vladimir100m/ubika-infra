@@ -246,65 +246,65 @@ variable "langfuse_host" {
 ################################################################################
 # LLM API keys (all sensitive, all default to empty string)
 ################################################################################
-variable "openai_api_key" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
+# variable "openai_api_key" {
+#   type      = string
+#   sensitive = true
+#   default   = ""
+# }
 
-variable "azure_openai_api_key" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
+# variable "azure_openai_api_key" {
+#   type      = string
+#   sensitive = true
+#   default   = ""
+# }
 
-variable "azure_api_key" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
+# variable "azure_api_key" {
+#   type      = string
+#   sensitive = true
+#   default   = ""
+# }
 
-variable "anthropic_api_key" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
+# variable "anthropic_api_key" {
+#   type      = string
+#   sensitive = true
+#   default   = ""
+# }
 
-variable "groq_api_key" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
+# variable "groq_api_key" {
+#   type      = string
+#   sensitive = true
+#   default   = ""
+# }
 
-variable "cohere_api_key" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
+# variable "cohere_api_key" {
+#   type      = string
+#   sensitive = true
+#   default   = ""
+# }
 
-variable "co_api_key" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
+# variable "co_api_key" {
+#   type      = string
+#   sensitive = true
+#   default   = ""
+# }
 
-variable "hf_token" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
+# variable "hf_token" {
+#   type      = string
+#   sensitive = true
+#   default   = ""
+# }
 
-variable "huggingface_api_key" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
+# variable "huggingface_api_key" {
+#   type      = string
+#   sensitive = true
+#   default   = ""
+# }
 
-variable "databricks_api_key" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
+# variable "databricks_api_key" {
+#   type      = string
+#   sensitive = true
+#   default   = ""
+# }
 
 variable "gemini_api_key" {
   type      = string
@@ -312,59 +312,59 @@ variable "gemini_api_key" {
   default   = ""
 }
 
-variable "codestral_api_key" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
+# variable "codestral_api_key" {
+#   type      = string
+#   sensitive = true
+#   default   = ""
+# }
 
-variable "mistral_api_key" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
+# variable "mistral_api_key" {
+#   type      = string
+#   sensitive = true
+#   default   = ""
+# }
 
-variable "azure_ai_api_key" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
+# variable "azure_ai_api_key" {
+#   type      = string
+#   sensitive = true
+#   default   = ""
+# }
 
-variable "nvidia_nim_api_key" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
+# variable "nvidia_nim_api_key" {
+#   type      = string
+#   sensitive = true
+#   default   = ""
+# }
 
-variable "xai_api_key" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
+# variable "xai_api_key" {
+#   type      = string
+#   sensitive = true
+#   default   = ""
+# }
 
-variable "perplexityai_api_key" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
+# variable "perplexityai_api_key" {
+#   type      = string
+#   sensitive = true
+#   default   = ""
+# }
 
-variable "github_api_key" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
+# variable "github_api_key" {
+#   type      = string
+#   sensitive = true
+#   default   = ""
+# }
 
-variable "deepseek_api_key" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
+# variable "deepseek_api_key" {
+#   type      = string
+#   sensitive = true
+#   default   = ""
+# }
 
-variable "ai21_api_key" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
+# variable "ai21_api_key" {
+#   type      = string
+#   sensitive = true
+#   default   = ""
+# }
 
 variable "langsmith_api_key" {
   type      = string
