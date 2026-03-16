@@ -1,5 +1,6 @@
-ARG LITELLM_VERSION=litellm_stable_release_branch-v1.73.0-stable
+ARG LITELLM_VERSION=latest-stable
 FROM ghcr.io/berriai/litellm:${LITELLM_VERSION}
+
 
 # Copy your specific config to the expected location
 # We use /app/config.yaml as it is the standard path LiteLLM looks for
