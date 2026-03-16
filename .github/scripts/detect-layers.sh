@@ -51,8 +51,8 @@ if [[ "$EVENT_NAME" == "workflow_dispatch" && -n "$MANUAL_LAYER" ]]; then
     CLEAN_LAYER="${MANUAL_LAYER#live/}"
     layers_json="[\"${CLEAN_LAYER}\"]"
 else
-    # 2. Auto-Detect via deploy.sh
-    layers_json="$(bash scripts/deploy.sh detect-layers "${RESOLVED_BASE}" "${HEAD_SHA}" || echo "[]")"
+    # 2. Auto-Detect via deploy.sh (uses git diff between RESOLVED_BASE and HEAD_SHA)
+    layers_json="$(bash .github/scripts/deploy.sh detect-layers "${RESOLVED_BASE}" "${HEAD_SHA}" || echo "[]")"
 fi
 
 # 3. Apply Weighted Sorting (Networking -> IAM -> Data -> LiteLLM -> Agents)
