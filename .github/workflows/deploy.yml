@@ -126,7 +126,7 @@ jobs:
 
           # workflow_dispatch: override folders when docker_folder is explicitly given
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.docker_folder }}" ]]; then
-            F_JSON=$(jq -n --arg f "${{ inputs.docker_folder }}" '[$f]')
+            F_JSON=$(jq -nc --arg f "${{ inputs.docker_folder }}" '[$f]')
           fi
 
           # workflow_dispatch: force_docker_build=true with no explicit folder → discover all .postbuild.sh targets
