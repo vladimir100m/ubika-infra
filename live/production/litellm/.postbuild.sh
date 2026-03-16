@@ -31,6 +31,26 @@ fi
 DOCKER_ARCH="$CPU_ARCHITECTURE"
 TERRAFORM_ARCHITECTURE="${TF_VAR_architecture:-x86}"
 
+case "$DOCKER_ARCH" in
+    linux/amd64)
+        inferred_terraform_architecture="x86"
+        ;;
+    linux/arm64)
+        inferred_terraform_architecture="arm"
+        ;;
+    *)
+        echo "Unsupported DOCKER_ARCH value: $DOCKER_ARCH"
+        exit 1
+        ;;
+esac
+
+if [[ -z "${TF_VAR_architecture:-}" ]]; then
+    TERRAFORM_ARCHITECTURE="$inferred_terraform_architecture"
+elif [[ "$TF_VAR_architecture" != "$inferred_terraform_architecture" ]]; then
+    echo "Error: TF_VAR_architecture=${TF_VAR_architecture} does not match DOCKER_ARCH=${DOCKER_ARCH}"
+    exit 1
+fi
+
 AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query 'Account' --output text)"
 ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 LITELLM_IMAGE_URI="${ECR_REGISTRY}/${LITELLM_REPOSITORY}:${LITELLM_VERSION}"
@@ -97,9 +117,12 @@ build_and_push_image() {
         build_args+=(--build-arg "LITELLM_VERSION=${version}")
     fi
 
-    docker build "${build_args[@]}" -t "${repository}:${version}" "$context"
-    docker tag "${repository}:${version}" "$image_uri"
-    docker push "$image_uri"
+    docker buildx build \
+        "${build_args[@]}" \
+        --pull \
+        --tag "$image_uri" \
+        --push \
+        "$context"
     validate_manifest_architecture "$image_uri"
 }
 
@@ -136,6 +159,7 @@ echo "LITELLM_VERSION=${LITELLM_VERSION}"
 echo "MIDDLEWARE_VERSION=${MIDDLEWARE_VERSION}"
 echo "ENABLE_MIDDLEWARE=${ENABLE_MIDDLEWARE}"
 echo "DOCKER_ARCH=${DOCKER_ARCH}"
+echo "ARCH=${TERRAFORM_ARCHITECTURE}"
 
 ensure_repository "$LITELLM_REPOSITORY"
 if [[ "$ENABLE_MIDDLEWARE" == "true" ]]; then

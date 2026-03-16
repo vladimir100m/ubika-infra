@@ -15,9 +15,9 @@ crash.log
 crash.*.log
 
 # ─── Environment / Secrets ───────────────────────────────────
-.env
-*.env
-*.env.local
+# .env
+# *.env
+# *.env.local
 
 # ─── Python ──────────────────────────────────────────────────
 *.pyc
