@@ -59,6 +59,9 @@ jobs:
         run: |
           set -euo pipefail
 
+          LAYERS=""
+          ORDERED=""
+
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             BASE_SHA="${{ github.event.pull_request.base.sha }}"
           else
@@ -77,21 +80,8 @@ jobs:
             LAYERS="${{ inputs.layer }}"
             LAYERS="${LAYERS#live/}"
           else
-            CHANGED_FILES="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
-            if grep -q '^modules/' <<< "$CHANGED_FILES"; then
-              LAYERS=$(find live -type f -name main.tf | sed 's|/main.tf$||' | sed 's|^live/||')
-            else
-              LAYERS=$(echo "$CHANGED_FILES" | grep '^live/' || true)
-              if [[ -n "$LAYERS" ]]; then
-                LAYERS=$(echo "$LAYERS" | while read -r file; do
-                  dir="$file"
-                  while [[ "$dir" != "." ]]; do
-                    dir=$(dirname "$dir")
-                    [[ -f "$dir/main.tf" ]] && echo "${dir#live/}" && break
-                  done
-                done | sort -u)
-              fi
-            fi
+            LAYERS_JSON="$(bash scripts/deploy.sh detect-layers "$BASE_SHA" "$HEAD_SHA")"
+            LAYERS="$(jq -r '.[]' <<< "$LAYERS_JSON" | sort -u || true)"
           fi
 
           # Handle empty LAYERS properly
