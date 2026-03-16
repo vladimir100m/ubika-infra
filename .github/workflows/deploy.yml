@@ -8,7 +8,7 @@ on:
       - modules/**
       - .github/workflows/deploy.yml
       - .github/scripts/**
-      - scripts/deploy.sh
+      - .github/scripts/deploy.sh
   pull_request:
     branches: ["main"]
     paths:
@@ -16,7 +16,7 @@ on:
       - modules/**
       - .github/workflows/deploy.yml
       - .github/scripts/**
-      - scripts/deploy.sh
+      - .github/scripts/deploy.sh
   workflow_dispatch:
     inputs:
       layer:
@@ -72,15 +72,14 @@ jobs:
         id: detect
         shell: bash
         run: |
-          # We pass everything to the external script to keep YAML clean
           bash .github/scripts/detect-layers.sh \
             "${{ github.event_name }}" \
-            "${{ github.event.before }}" \
+            "${{ github.event.before || '' }}" \
             "${{ github.sha }}" \
-            '${{ env.DEPLOY_EXCLUDE_LAYERS }}' \
-            "${{ inputs.layer }}" \
-            "${{ inputs.force_docker_build }}" \
-            "${{ inputs.docker_folder }}"
+            '${{ env.DEPLOY_EXCLUDE_LAYERS || "[]" }}' \
+            "${{ github.event.inputs.layer || '' }}" \
+            "${{ github.event.inputs.force_docker_build || 'false' }}" \
+            "${{ github.event.inputs.docker_folder || '' }}"
 
           # Map the CPU architecture for downstream jobs
           echo "cpu_architecture=${{ env.TF_VAR_architecture }}" >> "$GITHUB_OUTPUT"
@@ -137,14 +136,14 @@ jobs:
         uses: hashicorp/setup-terraform@v3
 
       - name: Terraform Init
-        run: bash scripts/deploy.sh terraform-init "${{ matrix.layer }}"
+        run: bash .github/scripts/deploy.sh terraform-init "${{ matrix.layer }}"
 
       - name: Terraform Plan
         env:
           TF_VAR_architecture: ${{ needs.changes.outputs.cpu_architecture }}
           TF_VAR_litellm_version: ${{ env.LITELLM_VERSION }}
           TF_VAR_middleware_version: ${{ env.MIDDLEWARE_VERSION }}
-        run: bash scripts/deploy.sh terraform-plan "${{ matrix.layer }}"
+        run: bash .github/scripts/deploy.sh terraform-plan "${{ matrix.layer }}"
 
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -152,4 +151,4 @@ jobs:
           TF_VAR_architecture: ${{ needs.changes.outputs.cpu_architecture }}
           TF_VAR_litellm_version: ${{ env.LITELLM_VERSION }}
           TF_VAR_middleware_version: ${{ env.MIDDLEWARE_VERSION }}
-        run: bash scripts/deploy.sh terraform-apply "${{ matrix.layer }}"
+        run: bash .github/scripts/deploy.sh terraform-apply "${{ matrix.layer }}"
