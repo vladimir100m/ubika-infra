@@ -11,4 +11,4 @@ WORKDIR /app
 # Override CMD to point to your new config file.
 # Note: We do NOT redefine ENTRYPOINT because the base image already has it.
 # We just provide the arguments:
-CMD ["--config", "/app/config.yaml", "--port", "8000"]
+CMD ["--config", "/app/config.yaml", "--port", "4000"]
