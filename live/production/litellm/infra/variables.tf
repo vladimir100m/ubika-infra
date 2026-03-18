@@ -47,9 +47,9 @@ variable "ecr_middleware_repository" {
 }
 
 variable "litellm_version" {
-  description = "Image tag to deploy for LiteLLM."
+  description = "Image tag to deploy for LiteLLM. Must match the tag built by the workflow (LITELLM_VERSION)."
   type        = string
-  default     = "latest"
+  default     = "latest-stable"
 }
 
 variable "middleware_version" {
