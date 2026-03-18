@@ -168,7 +168,7 @@ module "alb" {
     {
       litellm = {
         port              = 4000
-        health_check_path = "/health/liveliness"
+        health_check_path = "/health/readiness"
         health_check_port = "4000"
       }
     },
