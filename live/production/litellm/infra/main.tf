@@ -380,6 +380,27 @@ resource "aws_ssm_parameter" "litellm_url" {
   value = var.use_cloudfront ? "https://${module.cdn[0].domain_name}" : "https://${module.alb.alb_dns_name}"
 }
 
+# Internal URL for agent-to-gateway communication (always ALB DNS, avoids CloudFront)
+resource "aws_ssm_parameter" "litellm_internal_url" {
+  name  = "/ubika/${var.environment}/litellm_internal_url"
+  type  = "String"
+  value = "https://${module.alb.alb_dns_name}"
+}
+
+# Secret ARN for agent to read LITELLM_MASTER_KEY (LiteLLM proxy auth)
+resource "aws_ssm_parameter" "litellm_master_key_secret_arn" {
+  name  = "/ubika/${var.environment}/litellm_master_key_secret_arn"
+  type  = "String"
+  value = aws_secretsmanager_secret.master_salt.arn
+}
+
+# Secret name (for CDK from_secret_name_v2 when ARN lookup returns placeholder)
+resource "aws_ssm_parameter" "litellm_master_key_secret_name" {
+  name  = "/ubika/${var.environment}/litellm_master_key_secret_name"
+  type  = "String"
+  value = aws_secretsmanager_secret.master_salt.name
+}
+
 # ── IAM: Task Role inline policy ─────────────────────────────────────────────
 
 data "aws_iam_policy_document" "task_role" {
