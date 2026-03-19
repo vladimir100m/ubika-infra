@@ -112,17 +112,19 @@ jobs:
         if: steps.prebuild.outputs.tf_changed == '1' || steps.prebuild.outputs.force_deploy == '1'
         env:
           TF_VAR_architecture: ${{ steps.prebuild.outputs.arch }}
+          TF_VAR_manage_github_actions_role_policy: ${{ matrix.layer == '_global' && 'true' || 'false' }}
         run: bash scripts/deploy.sh terraform-plan "${{ matrix.layer }}"
 
       - name: Deploy (terraform apply)
         if: github.ref == 'refs/heads/main' && github.event_name == 'push' && (steps.prebuild.outputs.tf_changed == '1' || steps.prebuild.outputs.force_deploy == '1')
         env:
           TF_VAR_architecture: ${{ steps.prebuild.outputs.arch }}
+          TF_VAR_manage_github_actions_role_policy: ${{ matrix.layer == '_global' && 'true' || 'false' }}
         run: bash scripts/deploy.sh terraform-apply "${{ matrix.layer }}"
 
       - name: .postbuild check
         id: postbuild
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && (steps.prebuild.outputs.tf_changed == '1' || steps.prebuild.outputs.force_deploy == '1')
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         shell: bash
         run: |
           bash .github/scripts/postbuild-check.sh \
