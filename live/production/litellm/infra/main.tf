@@ -163,6 +163,7 @@ module "alb" {
   waf_arn                = module.waf.web_acl_arn
   enable_waf_association = true
   log_bucket_name        = local.log_bucket_name
+  idle_timeout           = 180 # 60s default causes 504 for image generation (~60-120s)
 
   target_groups = merge(
     {
@@ -238,8 +239,8 @@ resource "aws_secretsmanager_secret" "llm_api_keys" {
 resource "aws_secretsmanager_secret_version" "llm_api_keys" {
   secret_id = aws_secretsmanager_secret.llm_api_keys.id
   secret_string = jsonencode({
-    GEMINI_API_KEY       = var.gemini_api_key
-    LANGFUSE_SECRET_KEY  = var.langfuse_secret_key
+    GEMINI_API_KEY      = var.gemini_api_key
+    LANGFUSE_SECRET_KEY = var.langfuse_secret_key
   })
 }
 
