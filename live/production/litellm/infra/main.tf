@@ -163,7 +163,7 @@ module "alb" {
   waf_arn                = module.waf.web_acl_arn
   enable_waf_association = true
   log_bucket_name        = local.log_bucket_name
-  idle_timeout           = 180 # 60s default causes 504 for image generation (~60-120s)
+  idle_timeout           = 300 # 5 min to reduce 504s during slow/streaming requests
 
   target_groups = merge(
     {
