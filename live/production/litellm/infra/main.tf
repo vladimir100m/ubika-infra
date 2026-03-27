@@ -313,16 +313,6 @@ resource "aws_security_group_rule" "ecs_task_ingress_8000" {
   description              = "Allow ALB to FastAPI Agent containers"
 }
 
-resource "aws_security_group_rule" "ecs_task_ingress_8000" {
-  type                     = "ingress"
-  from_port                = 8000
-  to_port                  = 8000
-  protocol                 = "tcp"
-  security_group_id        = aws_security_group.ecs_task.id
-  source_security_group_id = module.alb.alb_security_group_id
-  description              = "Allow ALB to FastAPI Agent containers"
-}
-
 resource "aws_security_group_rule" "ecs_task_ingress_4000" {
   type                     = "ingress"
   from_port                = 4000
