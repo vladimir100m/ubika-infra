@@ -8,7 +8,7 @@ on:
       - modules/**
       - .github/workflows/deploy.yml
       - .github/scripts/**
-      - scripts/deploy.sh
+      - .github/scripts/deploy.sh
   pull_request:
     branches: ["main"]
     paths:
@@ -16,11 +16,19 @@ on:
       - modules/**
       - .github/workflows/deploy.yml
       - .github/scripts/**
-      - scripts/deploy.sh
+      - .github/scripts/deploy.sh
   workflow_dispatch:
     inputs:
       layer:
-        description: "Layer to deploy (e.g. _global, production/networking). Leave empty to auto-detect all."
+        description: "Optional layer override (e.g. production/networking)"
+        required: false
+        default: ""
+      force_docker_build:
+        description: "Force Docker image build (true/false)"
+        required: false
+        default: "false"
+      docker_folder:
+        description: "Folder to build Docker image from (e.g. live/production/litellm or production/litellm)"
         required: false
         default: ""
 
@@ -30,103 +38,117 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
-  # JSON array of layer paths (relative to live/) that must be excluded from deploy matrix.
-  # Example: ["production/litellm/bootstrap"]
   DEPLOY_EXCLUDE_LAYERS: '["production/litellm/bootstrap"]'
+  TF_IN_AUTOMATION: "1"
+  LITELLM_VERSION: latest-stable
+  MIDDLEWARE_VERSION: latest
+  CPU_ARCHITECTURE: linux/amd64
+  TF_VAR_architecture: x86
+  ECR_LITELLM_REPOSITORY: litellm
+  ECR_MIDDLEWARE_REPOSITORY: middleware
 
 concurrency:
   group: terraform-infra-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   changes:
-    name: Detect changed layers
+    name: Detect Changes
     runs-on: ubuntu-latest
     outputs:
+      has_changes: ${{ steps.detect.outputs.has_changes }}
+      folders: ${{ steps.detect.outputs.folders }}
       layers: ${{ steps.detect.outputs.layers }}
       base_sha: ${{ steps.detect.outputs.base_sha }}
       head_sha: ${{ steps.detect.outputs.head_sha }}
+      cpu_architecture: ${{ steps.detect.outputs.cpu_architecture }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Detect changed layers
+      - name: Run Detection Script
         id: detect
         shell: bash
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          else
-            BASE_SHA="${{ github.event.before }}"
-          fi
-
           bash .github/scripts/detect-layers.sh \
             "${{ github.event_name }}" \
-            "${BASE_SHA}" \
+            "${{ github.event.before || '' }}" \
             "${{ github.sha }}" \
-            '${{ env.DEPLOY_EXCLUDE_LAYERS }}' \
-            "${{ inputs.layer }}"
+            '${{ env.DEPLOY_EXCLUDE_LAYERS || '[]' }}' \
+            "${{ github.event.inputs.layer || '' }}" \
+            "${{ github.event.inputs.force_docker_build || 'false' }}" \
+            "${{ github.event.inputs.docker_folder || '' }}"
 
-  deploy:
-    name: "[${{ matrix.layer }}] Terraform"
+          # Map the CPU architecture for downstream jobs
+          echo "cpu_architecture=${{ env.TF_VAR_architecture }}" >> "$GITHUB_OUTPUT"
+
+  docker:
+    name: Build [${{ matrix.folder }}]
     needs: changes
-    if: ${{ needs.changes.outputs.layers != '[]' }}
+    if: github.event_name != 'pull_request' && needs.changes.outputs.folders != '[]'
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
       matrix:
-        layer: ${{ fromJSON(needs.changes.outputs.layers) }}
-
+        folder: ${{ fromJSON(needs.changes.outputs.folders) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (OIDC)
+      - name: AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: .prebuild check
-        id: prebuild
-        shell: bash
-        run: |
-          bash .github/scripts/prebuild-check.sh \
-            "$(bash scripts/deploy.sh resolve-dir '${{ matrix.layer }}')" \
-            "${{ needs.changes.outputs.base_sha }}" \
-            "${{ needs.changes.outputs.head_sha }}" > prebuild_output.txt
-          cat prebuild_output.txt
-          TF_CHANGED=$(grep '^TF_CHANGED=' prebuild_output.txt | cut -d'=' -f2 | xargs)
-          FORCE_DEPLOY=$(grep '^FORCE_DEPLOY=' prebuild_output.txt | cut -d'=' -f2 | xargs)
-          ARCH=$(grep '^ARCH=' prebuild_output.txt | cut -d'=' -f2 | xargs)
-          echo "tf_changed=${TF_CHANGED:-0}" >> "$GITHUB_OUTPUT"
-          echo "force_deploy=${FORCE_DEPLOY:-0}" >> "$GITHUB_OUTPUT"
-          echo "arch=${ARCH:-x86}" >> "$GITHUB_OUTPUT"
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and Push
+        run: bash .github/scripts/build-image.sh "${{ matrix.folder }}"
+
+  terraform:
+    name: TF [${{ matrix.layer }}]
+    needs: [changes, docker]
+    # Ensure TF runs even if Docker was skipped (because no code changed there)
+    if: |
+      always() && 
+      needs.changes.outputs.layers != '[]' && 
+      (needs.docker.result == 'success' || needs.docker.result == 'skipped')
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        layer: ${{ fromJSON(needs.changes.outputs.layers) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
-      - name: Build (terraform plan)
-        if: steps.prebuild.outputs.tf_changed == '1' || steps.prebuild.outputs.force_deploy == '1'
-        env:
-          TF_VAR_architecture: ${{ steps.prebuild.outputs.arch }}
-          TF_VAR_manage_github_actions_role_policy: ${{ matrix.layer == '_global' && 'true' || 'false' }}
-        run: bash scripts/deploy.sh terraform-plan "${{ matrix.layer }}"
+      - name: Terraform Init
+        run: bash .github/scripts/deploy.sh terraform-init "${{ matrix.layer }}"
 
-      - name: Deploy (terraform apply)
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && (steps.prebuild.outputs.tf_changed == '1' || steps.prebuild.outputs.force_deploy == '1')
+      - name: Terraform Plan
         env:
-          TF_VAR_architecture: ${{ steps.prebuild.outputs.arch }}
-          TF_VAR_manage_github_actions_role_policy: ${{ matrix.layer == '_global' && 'true' || 'false' }}
-        run: bash scripts/deploy.sh terraform-apply "${{ matrix.layer }}"
+          TF_VAR_architecture: ${{ needs.changes.outputs.cpu_architecture }}
+          TF_VAR_litellm_version: ${{ env.LITELLM_VERSION }}
+          TF_VAR_middleware_version: ${{ env.MIDDLEWARE_VERSION }}
+        run: bash .github/scripts/deploy.sh terraform-plan "${{ matrix.layer }}"
 
-      - name: .postbuild check
-        id: postbuild
+      - name: Terraform Apply
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        shell: bash
-        run: |
-          bash .github/scripts/postbuild-check.sh \
-            "$(bash scripts/deploy.sh resolve-dir '${{ matrix.layer }}')" > postbuild_output.txt
-          cat postbuild_output.txt
+        env:
+          TF_VAR_architecture: ${{ needs.changes.outputs.cpu_architecture }}
+          TF_VAR_litellm_version: ${{ env.LITELLM_VERSION }}
+          TF_VAR_middleware_version: ${{ env.MIDDLEWARE_VERSION }}
+        run: bash .github/scripts/deploy.sh terraform-apply "${{ matrix.layer }}"

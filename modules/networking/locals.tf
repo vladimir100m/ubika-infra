@@ -1,9 +1,17 @@
 locals {
-  nat_gateway_count = var.disable_outbound_network_access ? 0 : 1
-
+  # nat_gateway_count = var.disable_outbound_network_access ? 0 : 1
+  nat_gateway_count = var.disable_outbound_network_access || !var.enable_nat_gateway ? 0 : (var.single_nat_gateway ? 1 : 2)
+  
   creating_new_vpc = length(trimspace(var.vpc_id)) == 0
   final_vpc_id     = local.creating_new_vpc ? aws_vpc.new[0].id : data.aws_vpc.existing[0].id
 }
+
+# locals {
+#   creating_new_vpc = var.vpc_id == ""
+#   # 2. If single_nat is true, count is 1.
+#   # 3. Otherwise, use 2 (one for each public subnet/AZ).
+#   # nat_gateway_count = var.disable_outbound_network_access || !var.enable_nat_gateway ? 0 : (var.single_nat_gateway ? 1 : 2)
+# }
 
 data "aws_subnets" "public_ip_subnets" {
   filter {

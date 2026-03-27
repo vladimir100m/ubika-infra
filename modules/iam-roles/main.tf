@@ -54,16 +54,11 @@ data "aws_iam_policy_document" "execution_extra" {
   }
 }
 
-resource "aws_iam_policy" "execution_extra" {
+resource "aws_iam_role_policy" "execution_extra" {
   count  = length(var.extra_secrets_arns) > 0 ? 1 : 0
   name   = "${var.name}-ecs-execution-extra-policy"
+  role   = aws_iam_role.execution.name
   policy = data.aws_iam_policy_document.execution_extra[0].json
-}
-
-resource "aws_iam_role_policy_attachment" "execution_extra" {
-  count      = length(var.extra_secrets_arns) > 0 ? 1 : 0
-  role       = aws_iam_role.execution.name
-  policy_arn = aws_iam_policy.execution_extra[0].arn
 }
 
 resource "aws_iam_role_policy_attachment" "execution_extra_managed" {

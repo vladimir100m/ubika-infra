@@ -164,12 +164,13 @@ module "alb" {
   waf_arn                = module.waf.web_acl_arn
   enable_waf_association = true
   log_bucket_name        = local.log_bucket_name
-  idle_timeout           = 180 # 60s default causes 504 for image generation (~60-120s)
+  idle_timeout           = 300 # 5 min to reduce 504s during slow/streaming requests
 
   target_groups = merge(
     {
       litellm = {
         port              = 4000
+        health_check_path = "/health/readiness"
         health_check_path = "/health/readiness"
         health_check_port = "4000"
       }
@@ -242,6 +243,8 @@ resource "aws_secretsmanager_secret_version" "llm_api_keys" {
   secret_string = jsonencode({
     GEMINI_API_KEY      = var.gemini_api_key
     LANGFUSE_SECRET_KEY = var.langfuse_secret_key
+    GEMINI_API_KEY      = var.gemini_api_key
+    LANGFUSE_SECRET_KEY = var.langfuse_secret_key
   })
 }
 
@@ -298,6 +301,16 @@ resource "aws_security_group" "ecs_task" {
   tags = {
     Name = "${var.name}-litellm-task-sg"
   }
+}
+
+resource "aws_security_group_rule" "ecs_task_ingress_8000" {
+  type                     = "ingress"
+  from_port                = 8000
+  to_port                  = 8000
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.ecs_task.id
+  source_security_group_id = module.alb.alb_security_group_id
+  description              = "Allow ALB to FastAPI Agent containers"
 }
 
 resource "aws_security_group_rule" "ecs_task_ingress_8000" {
