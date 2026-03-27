@@ -1,6 +1,5 @@
 ###############################################################################
 # live/production/litellm/infra
-# force
 # Main LiteLLM infrastructure layer.
 # Reads networking state from live/production/networking/ and wires together:
 #
@@ -164,12 +163,13 @@ module "alb" {
   waf_arn                = module.waf.web_acl_arn
   enable_waf_association = true
   log_bucket_name        = local.log_bucket_name
+  idle_timeout           = 180 # 60s default causes 504 for image generation (~60-120s)
 
   target_groups = merge(
     {
       litellm = {
         port              = 4000
-        health_check_path = "/health/liveliness"
+        health_check_path = "/health/readiness"
         health_check_port = "4000"
       }
     },
@@ -239,28 +239,8 @@ resource "aws_secretsmanager_secret" "llm_api_keys" {
 resource "aws_secretsmanager_secret_version" "llm_api_keys" {
   secret_id = aws_secretsmanager_secret.llm_api_keys.id
   secret_string = jsonencode({
-    OPENAI_API_KEY       = var.openai_api_key
-    AZURE_OPENAI_API_KEY = var.azure_openai_api_key
-    AZURE_API_KEY        = var.azure_api_key
-    ANTHROPIC_API_KEY    = var.anthropic_api_key
-    GROQ_API_KEY         = var.groq_api_key
-    COHERE_API_KEY       = var.cohere_api_key
-    CO_API_KEY           = var.co_api_key
-    HF_TOKEN             = var.hf_token
-    HUGGINGFACE_API_KEY  = var.huggingface_api_key
-    DATABRICKS_API_KEY   = var.databricks_api_key
-    GEMINI_API_KEY       = var.gemini_api_key
-    CODESTRAL_API_KEY    = var.codestral_api_key
-    MISTRAL_API_KEY      = var.mistral_api_key
-    AZURE_AI_API_KEY     = var.azure_ai_api_key
-    NVIDIA_NIM_API_KEY   = var.nvidia_nim_api_key
-    XAI_API_KEY          = var.xai_api_key
-    PERPLEXITYAI_API_KEY = var.perplexityai_api_key
-    GITHUB_API_KEY       = var.github_api_key
-    DEEPSEEK_API_KEY     = var.deepseek_api_key
-    AI21_API_KEY         = var.ai21_api_key
-    LANGSMITH_API_KEY    = var.langsmith_api_key
-    LANGFUSE_SECRET_KEY  = var.langfuse_secret_key
+    GEMINI_API_KEY      = var.gemini_api_key
+    LANGFUSE_SECRET_KEY = var.langfuse_secret_key
   })
 }
 
@@ -319,6 +299,16 @@ resource "aws_security_group" "ecs_task" {
   }
 }
 
+resource "aws_security_group_rule" "ecs_task_ingress_8000" {
+  type                     = "ingress"
+  from_port                = 8000
+  to_port                  = 8000
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.ecs_task.id
+  source_security_group_id = module.alb.alb_security_group_id
+  description              = "Allow ALB to FastAPI Agent containers"
+}
+
 resource "aws_security_group_rule" "ecs_task_ingress_4000" {
   type                     = "ingress"
   from_port                = 4000
@@ -360,6 +350,45 @@ resource "aws_security_group_rule" "rds_ingress_from_ecs" {
   description              = "Allow ECS tasks to RDS"
 }
 
+# This is how Repo B (CDK) knows where to deploy without hardcoding.
+resource "aws_ssm_parameter" "vpc_id" {
+  name  = "/ubika/${var.environment}/vpc_id"
+  type  = "String"
+  value = local.networking_vpc_id
+}
+
+resource "aws_ssm_parameter" "alb_listener_arn" {
+  name  = "/ubika/${var.environment}/alb_https_listener_arn"
+  type  = "String"
+  value = module.alb.https_listener_arn
+}
+
+resource "aws_ssm_parameter" "alb_sg_id" {
+  name  = "/ubika/${var.environment}/alb_security_group_id"
+  type  = "String"
+  value = module.alb.alb_security_group_id
+}
+
+resource "aws_ssm_parameter" "private_subnets" {
+  name  = "/ubika/${var.environment}/private_subnet_ids"
+  type  = "StringList"
+  value = join(",", data.terraform_remote_state.networking.outputs.private_subnet_ids)
+}
+
+resource "aws_ssm_parameter" "litellm_url" {
+  name  = "/ubika/${var.environment}/litellm_url"
+  type  = "String"
+  value = var.use_cloudfront ? "https://${module.cdn[0].domain_name}" : "https://${module.alb.alb_dns_name}"
+}
+
+# Internal URL for agent-to-gateway communication (always ALB DNS, avoids CloudFront)
+resource "aws_ssm_parameter" "litellm_internal_url" {
+  name  = "/ubika/${var.environment}/litellm_internal_url"
+  type  = "String"
+  value = "https://${module.alb.alb_dns_name}"
+}
+
+
 # ── IAM: Task Role inline policy ─────────────────────────────────────────────
 
 data "aws_iam_policy_document" "task_role" {
@@ -397,14 +426,10 @@ data "aws_iam_policy_document" "task_role" {
   }
 }
 
-resource "aws_iam_policy" "task_role" {
+resource "aws_iam_role_policy" "task_role" {
   name   = "${var.name}-litellm-task-policy"
+  role   = module.iam.task_role_name
   policy = data.aws_iam_policy_document.task_role.json
-}
-
-resource "aws_iam_role_policy_attachment" "task_role_custom" {
-  role       = module.iam.task_role_name
-  policy_arn = aws_iam_policy.task_role.arn
 }
 
 # ── Container definitions (LiteLLM + Middleware) ──────────────────────────────
@@ -450,27 +475,27 @@ locals {
       { name = "UI_PASSWORD", valueFrom = "${aws_secretsmanager_secret.master_salt.arn}:LITELLM_MASTER_KEY::" },
       { name = "LITELLM_SALT_KEY", valueFrom = "${aws_secretsmanager_secret.master_salt.arn}:LITELLM_SALT_KEY::" },
       { name = "REDIS_PASSWORD", valueFrom = "${aws_secretsmanager_secret.redis_auth.arn}:REDIS_PASSWORD::" },
-      { name = "OPENAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:OPENAI_API_KEY::" },
-      { name = "AZURE_OPENAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AZURE_OPENAI_API_KEY::" },
-      { name = "AZURE_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AZURE_API_KEY::" },
-      { name = "ANTHROPIC_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:ANTHROPIC_API_KEY::" },
-      { name = "GROQ_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:GROQ_API_KEY::" },
-      { name = "COHERE_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:COHERE_API_KEY::" },
-      { name = "CO_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:CO_API_KEY::" },
-      { name = "HF_TOKEN", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:HF_TOKEN::" },
-      { name = "HUGGINGFACE_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:HUGGINGFACE_API_KEY::" },
-      { name = "DATABRICKS_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:DATABRICKS_API_KEY::" },
+      # { name = "OPENAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:OPENAI_API_KEY::" },
+      # { name = "AZURE_OPENAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AZURE_OPENAI_API_KEY::" },
+      # { name = "AZURE_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AZURE_API_KEY::" },
+      # { name = "ANTHROPIC_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:ANTHROPIC_API_KEY::" },
+      # { name = "GROQ_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:GROQ_API_KEY::" },
+      # { name = "COHERE_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:COHERE_API_KEY::" },
+      # { name = "CO_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:CO_API_KEY::" },
+      # { name = "HF_TOKEN", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:HF_TOKEN::" },
+      # { name = "HUGGINGFACE_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:HUGGINGFACE_API_KEY::" },
+      # { name = "DATABRICKS_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:DATABRICKS_API_KEY::" },
       { name = "GEMINI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:GEMINI_API_KEY::" },
-      { name = "CODESTRAL_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:CODESTRAL_API_KEY::" },
-      { name = "MISTRAL_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:MISTRAL_API_KEY::" },
-      { name = "AZURE_AI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AZURE_AI_API_KEY::" },
-      { name = "NVIDIA_NIM_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:NVIDIA_NIM_API_KEY::" },
-      { name = "XAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:XAI_API_KEY::" },
-      { name = "PERPLEXITYAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:PERPLEXITYAI_API_KEY::" },
-      { name = "GITHUB_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:GITHUB_API_KEY::" },
-      { name = "DEEPSEEK_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:DEEPSEEK_API_KEY::" },
-      { name = "AI21_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AI21_API_KEY::" },
-      { name = "LANGSMITH_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:LANGSMITH_API_KEY::" },
+      # { name = "CODESTRAL_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:CODESTRAL_API_KEY::" },
+      # { name = "MISTRAL_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:MISTRAL_API_KEY::" },
+      # { name = "AZURE_AI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AZURE_AI_API_KEY::" },
+      # { name = "NVIDIA_NIM_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:NVIDIA_NIM_API_KEY::" },
+      # { name = "XAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:XAI_API_KEY::" },
+      # { name = "PERPLEXITYAI_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:PERPLEXITYAI_API_KEY::" },
+      # { name = "GITHUB_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:GITHUB_API_KEY::" },
+      # { name = "DEEPSEEK_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:DEEPSEEK_API_KEY::" },
+      # { name = "AI21_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:AI21_API_KEY::" },
+      # { name = "LANGSMITH_API_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:LANGSMITH_API_KEY::" },
       { name = "LANGFUSE_SECRET_KEY", valueFrom = "${aws_secretsmanager_secret_version.llm_api_keys.arn}:LANGFUSE_SECRET_KEY::" },
     ]
 
