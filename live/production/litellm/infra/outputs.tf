@@ -51,3 +51,18 @@ output "task_role_arn" {
   description = "ARN of the ECS Task Role."
   value       = module.iam.task_role_arn
 }
+
+output "ecs_scale_toggle_lambda_name" {
+  description = "Lambda to pause (mode=stop) or resume (mode=start) ECS tasks. Invoke manually from console or CLI."
+  value       = module.ecs_scale_toggle.function_name
+}
+
+output "ecs_scale_toggle_invoke_stop" {
+  description = "Example: scale desired and min capacity to 0."
+  value       = module.ecs_scale_toggle.invoke_cli_example_stop
+}
+
+output "ecs_scale_toggle_invoke_start" {
+  description = "Example: scale desired and min capacity to 1."
+  value       = module.ecs_scale_toggle.invoke_cli_example_start
+}
