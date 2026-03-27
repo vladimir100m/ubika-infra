@@ -21,6 +21,7 @@
 #     aws_iam_policy                → Task Role inline policy (S3, Bedrock, etc.)
 #     aws_ecs_task_definition       → LiteLLM + Middleware containers
 #     aws_ecs_service               → Fargate service with 2 TG bindings
+#     module.ecs_scale_toggle       → Lambda to set desired/min tasks to 0 or 1 (manual invoke)
 #     aws_lb_listener_rule          → All LiteLLM routing rules
 #     aws_s3_object                 → config.yaml upload
 #     aws_security_group            → ECS task SG
@@ -170,6 +171,7 @@ module "alb" {
       litellm = {
         port              = 4000
         health_check_path = "/health/readiness"
+        health_check_path = "/health/readiness"
         health_check_port = "4000"
       }
     },
@@ -241,6 +243,8 @@ resource "aws_secretsmanager_secret_version" "llm_api_keys" {
   secret_string = jsonencode({
     GEMINI_API_KEY      = var.gemini_api_key
     LANGFUSE_SECRET_KEY = var.langfuse_secret_key
+    GEMINI_API_KEY      = var.gemini_api_key
+    LANGFUSE_SECRET_KEY = var.langfuse_secret_key
   })
 }
 
@@ -271,12 +275,12 @@ resource "aws_s3_object" "config_yaml" {
 
 resource "aws_cloudwatch_log_group" "litellm" {
   name              = "/ecs/${var.name}-litellm"
-  retention_in_days = 365
+  retention_in_days = var.ecs_cloudwatch_log_retention_days
 }
 
 resource "aws_cloudwatch_log_group" "middleware" {
   name              = "/ecs/${var.name}-middleware"
-  retention_in_days = 365
+  retention_in_days = var.ecs_cloudwatch_log_retention_days
 }
 
 # ── ECS task security group ───────────────────────────────────────────────────
@@ -602,6 +606,19 @@ module "service" {
     aws_secretsmanager_secret_version.llm_api_keys,
     aws_secretsmanager_secret_version.redis_auth,
   ]
+}
+
+# ── Lambda: manual ECS scale to 0/0 or 1/1 (cost pause / resume) ─────────────
+
+module "ecs_scale_toggle" {
+  source = "../../../../modules/ecs-capacity-toggle-lambda"
+
+  name             = "${var.name}-litellm"
+  ecs_cluster_name = module.cluster.cluster_name
+  ecs_service_name = module.service.service_name
+  max_task_count   = var.max_capacity
+
+  depends_on = [module.service]
 }
 
 # ── ALB Listener rules (LiteLLM routing) ─────────────────────────────────────

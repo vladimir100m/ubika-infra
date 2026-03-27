@@ -109,7 +109,7 @@ variable "redis_node_type" {
 variable "redis_num_cache_clusters" {
   description = "Number of cache nodes (primary + replicas)."
   type        = number
-  default     = 2
+  default     = 1
 }
 
 ################################################################################
@@ -149,6 +149,12 @@ variable "memory_target_utilization_percent" {
   description = "Target memory utilization for auto-scaling."
   type        = number
   default     = 80
+}
+
+variable "ecs_cloudwatch_log_retention_days" {
+  description = "CloudWatch Logs retention (days) for ECS task logs (LiteLLM and middleware)."
+  type        = number
+  default     = 14
 }
 
 variable "architecture" {
