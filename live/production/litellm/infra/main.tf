@@ -115,8 +115,10 @@ module "redis" {
   vpc_id     = local.networking_vpc_id
   subnet_ids = data.terraform_remote_state.networking.outputs.private_subnet_ids
 
-  node_type          = var.redis_node_type
-  num_cache_clusters = var.redis_num_cache_clusters
+  node_type                  = var.redis_node_type
+  num_cache_clusters         = var.redis_num_cache_clusters
+  automatic_failover_enabled = var.redis_automatic_failover_enabled
+  multi_az_enabled           = var.redis_multi_az_enabled
 
   # SG rules are attached in this root module after both SGs exist.
   allowed_security_group_ids = []

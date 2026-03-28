@@ -107,9 +107,21 @@ variable "redis_node_type" {
 }
 
 variable "redis_num_cache_clusters" {
-  description = "Number of cache nodes (primary + replicas)."
+  description = "Number of cache nodes (primary + replicas). Reducing 2→1 requires a two-step apply; see redis_automatic_failover_enabled."
   type        = number
   default     = 1
+}
+
+variable "redis_automatic_failover_enabled" {
+  description = "Override ElastiCache automatic failover (null = enabled when redis_num_cache_clusters > 1). AWS rejects dropping to one node while failover is still on: first apply with redis_num_cache_clusters left at 2 and this set to false (and redis_multi_az_enabled = false), then apply with redis_num_cache_clusters = 1."
+  type        = bool
+  default     = null
+}
+
+variable "redis_multi_az_enabled" {
+  description = "Override ElastiCache Multi-AZ (null = enabled when redis_num_cache_clusters > 1). Set false together with redis_automatic_failover_enabled during the first step of a 2→1 node migration."
+  type        = bool
+  default     = null
 }
 
 ################################################################################
