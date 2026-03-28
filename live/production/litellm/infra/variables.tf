@@ -112,14 +112,19 @@ variable "redis_num_cache_clusters" {
   default     = 1
 }
 
+# Use type = bool, default = null, nullable = true — do not use optional(bool) here (invalid for root variables).
 variable "redis_automatic_failover_enabled" {
-  description = "Override ElastiCache automatic failover (omit = enabled when redis_num_cache_clusters > 1). AWS rejects dropping to one node while failover is still on: first apply with redis_num_cache_clusters left at 2 and this set to false (and redis_multi_az_enabled = false), then apply with redis_num_cache_clusters = 1."
-  type        = optional(bool)
+  description = "Override ElastiCache automatic failover (null = enabled when redis_num_cache_clusters > 1). AWS rejects dropping to one node while failover is still on: first apply with redis_num_cache_clusters left at 2 and this set to false (and redis_multi_az_enabled = false), then apply with redis_num_cache_clusters = 1."
+  type        = bool
+  default     = null
+  nullable    = true
 }
 
 variable "redis_multi_az_enabled" {
-  description = "Override ElastiCache Multi-AZ (omit = enabled when redis_num_cache_clusters > 1). Set false together with redis_automatic_failover_enabled during the first step of a 2→1 node migration."
-  type        = optional(bool)
+  description = "Override ElastiCache Multi-AZ (null = enabled when redis_num_cache_clusters > 1). Set false together with redis_automatic_failover_enabled during the first step of a 2→1 node migration."
+  type        = bool
+  default     = null
+  nullable    = true
 }
 
 ################################################################################
