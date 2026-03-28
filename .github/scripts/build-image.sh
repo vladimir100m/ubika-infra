@@ -4,6 +4,17 @@ set -euo pipefail
 
 TARGET_FOLDER="${1:?Target folder is required (e.g., live/production/agents)}"
 
+if [[ ! -d "$TARGET_FOLDER" ]]; then
+  echo "Error: directory not found: $TARGET_FOLDER" >&2
+  exit 1
+fi
+
+# Terraform-only layers (e.g. networking) have no image — skip build/push cleanly.
+if [[ ! -f "$TARGET_FOLDER/Dockerfile" ]] && [[ ! -f "$TARGET_FOLDER/.postbuild.sh" ]]; then
+  echo "Skipping image build: no Dockerfile or .postbuild.sh in ${TARGET_FOLDER}"
+  exit 0
+fi
+
 # 1. Load Environment
 if [[ -f .env ]]; then
     set -a; source .env; set +a
