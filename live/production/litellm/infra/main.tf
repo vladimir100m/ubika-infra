@@ -173,7 +173,6 @@ module "alb" {
       litellm = {
         port              = 4000
         health_check_path = "/health/readiness"
-        health_check_path = "/health/readiness"
         health_check_port = "4000"
       }
     },
@@ -243,8 +242,6 @@ resource "aws_secretsmanager_secret" "llm_api_keys" {
 resource "aws_secretsmanager_secret_version" "llm_api_keys" {
   secret_id = aws_secretsmanager_secret.llm_api_keys.id
   secret_string = jsonencode({
-    GEMINI_API_KEY      = var.gemini_api_key
-    LANGFUSE_SECRET_KEY = var.langfuse_secret_key
     GEMINI_API_KEY      = var.gemini_api_key
     LANGFUSE_SECRET_KEY = var.langfuse_secret_key
   })
