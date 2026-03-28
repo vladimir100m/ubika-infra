@@ -115,8 +115,10 @@ module "redis" {
   vpc_id     = local.networking_vpc_id
   subnet_ids = data.terraform_remote_state.networking.outputs.private_subnet_ids
 
-  node_type          = var.redis_node_type
-  num_cache_clusters = var.redis_num_cache_clusters
+  node_type                  = var.redis_node_type
+  num_cache_clusters         = var.redis_num_cache_clusters
+  automatic_failover_enabled = var.redis_automatic_failover_enabled
+  multi_az_enabled           = var.redis_multi_az_enabled
 
   # SG rules are attached in this root module after both SGs exist.
   allowed_security_group_ids = []
@@ -170,7 +172,6 @@ module "alb" {
     {
       litellm = {
         port              = 4000
-        health_check_path = "/health/readiness"
         health_check_path = "/health/readiness"
         health_check_port = "4000"
       }
@@ -241,8 +242,6 @@ resource "aws_secretsmanager_secret" "llm_api_keys" {
 resource "aws_secretsmanager_secret_version" "llm_api_keys" {
   secret_id = aws_secretsmanager_secret.llm_api_keys.id
   secret_string = jsonencode({
-    GEMINI_API_KEY      = var.gemini_api_key
-    LANGFUSE_SECRET_KEY = var.langfuse_secret_key
     GEMINI_API_KEY      = var.gemini_api_key
     LANGFUSE_SECRET_KEY = var.langfuse_secret_key
   })

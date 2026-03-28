@@ -10,6 +10,8 @@
 # Reusable for: any service that needs a managed Redis cache/session store.
 ###############################################################################
 
+data "aws_region" "current" {}
+
 # ── Random auth token ────────────────────────────────────────────────────────
 resource "random_password" "auth_token" {
   length  = 32
@@ -75,8 +77,33 @@ resource "aws_elasticache_parameter_group" "this" {
 }
 
 # ── Replication group ────────────────────────────────────────────────────────
+locals {
+  effective_automatic_failover = coalesce(var.automatic_failover_enabled, var.num_cache_clusters > 1)
+  effective_multi_az           = coalesce(var.multi_az_enabled, var.num_cache_clusters > 1)
+  replication_group_id         = "${var.name}-redis"
+}
+
+# The AWS Terraform provider can invoke DecreaseReplicaCount before AutomaticFailoverEnabled is
+# applied, which ElastiCache rejects. When scaling to one node, disable failover via CLI first.
+resource "null_resource" "pre_modify_disable_failover" {
+  triggers = {
+    desired_nodes = tostring(var.num_cache_clusters)
+    enabled       = tostring(var.pre_modify_disable_failover_via_cli)
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
+    command = templatefile("${path.module}/pre_modify_failover.sh.tpl", {
+      rg_id   = local.replication_group_id
+      region  = data.aws_region.current.name
+      desired = tostring(var.num_cache_clusters)
+      enabled = var.pre_modify_disable_failover_via_cli ? "true" : "false"
+    })
+  }
+}
+
 resource "aws_elasticache_replication_group" "this" {
-  replication_group_id = "${var.name}-redis"
+  replication_group_id = local.replication_group_id
   description          = "Redis replication group for ${var.name}"
 
   engine         = "redis"
@@ -84,8 +111,8 @@ resource "aws_elasticache_replication_group" "this" {
   node_type      = var.node_type
 
   num_cache_clusters         = var.num_cache_clusters
-  automatic_failover_enabled = var.num_cache_clusters > 1
-  multi_az_enabled           = var.num_cache_clusters > 1
+  automatic_failover_enabled = local.effective_automatic_failover
+  multi_az_enabled           = local.effective_multi_az
 
   parameter_group_name = aws_elasticache_parameter_group.this.name
   subnet_group_name    = aws_elasticache_subnet_group.this.name
@@ -97,8 +124,10 @@ resource "aws_elasticache_replication_group" "this" {
   transit_encryption_enabled = true
   transit_encryption_mode    = "required"
 
-  auth_token                   = random_password.auth_token.result
-  auth_token_update_strategy   = "SET"
+  auth_token                 = random_password.auth_token.result
+  auth_token_update_strategy = "SET"
+
+  apply_immediately = true
 
   tags = {
     Name = "${var.name}-redis"
@@ -107,5 +136,6 @@ resource "aws_elasticache_replication_group" "this" {
   depends_on = [
     aws_elasticache_subnet_group.this,
     aws_elasticache_parameter_group.this,
+    null_resource.pre_modify_disable_failover,
   ]
 }

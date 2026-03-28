@@ -31,8 +31,26 @@ variable "num_cache_clusters" {
   default     = 2
 }
 
+variable "automatic_failover_enabled" {
+  description = "If null (default), failover is on when num_cache_clusters > 1. Set false and keep num_cache_clusters at the current count for one apply before lowering num_cache_clusters to 1 (AWS requires failover off before removing the last replica)."
+  type        = bool
+  default     = null
+}
+
+variable "multi_az_enabled" {
+  description = "If null (default), Multi-AZ follows num_cache_clusters > 1. Override together with automatic_failover_enabled when migrating down to a single node."
+  type        = bool
+  default     = null
+}
+
 variable "allowed_security_group_ids" {
   description = "List of security group IDs allowed to connect to Redis on port 6379."
   type        = list(string)
   default     = []
+}
+
+variable "pre_modify_disable_failover_via_cli" {
+  description = "Before Terraform shrinks a multi-node group to one node, run AWS CLI to disable automatic failover (Terraform provider can call DecreaseReplicaCount before failover is off). Requires aws CLI in PATH. Set false in environments where local-exec cannot run."
+  type        = bool
+  default     = true
 }
