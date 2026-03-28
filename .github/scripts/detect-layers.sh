@@ -90,6 +90,24 @@ else
     folders_json=$(echo "$filtered" | jq -c 'map("live/" + (split("/") | .[0:2] | join("/"))) | unique')
 fi
 
+# Only schedule docker matrix jobs for paths that define an image (Dockerfile or .postbuild hook).
+filter_folders_with_docker_build() {
+    local json="$1"
+    local result="[]"
+    local folder
+    while IFS= read -r folder; do
+        [[ -z "$folder" || "$folder" == "null" ]] && continue
+        if [[ -f "${folder}/Dockerfile" ]] || [[ -f "${folder}/.postbuild.sh" ]]; then
+            result=$(echo "$result" | jq -c --arg f "$folder" '. + [$f]')
+        else
+            echo "[detect-layers] Skipping image build (no Dockerfile or .postbuild.sh in ${folder})"
+        fi
+    done < <(echo "$json" | jq -r '.[]? // empty')
+    echo "$result"
+}
+
+folders_json="$(filter_folders_with_docker_build "$folders_json")"
+
 # 5. Emit Final Results
 emit_output "layers" "$filtered"
 emit_output "folders" "$folders_json"
