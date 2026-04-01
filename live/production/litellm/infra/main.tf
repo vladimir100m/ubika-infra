@@ -172,7 +172,8 @@ module "alb" {
     {
       litellm = {
         port              = 4000
-        health_check_path = "/health/readiness"
+        # Liveness: process is up. Readiness waits for DB/router and often fails ALB checks if DB is slow or misconfigured.
+        health_check_path = "/health/liveliness"
         health_check_port = "4000"
       }
     },
