@@ -189,6 +189,38 @@ module "alb" {
   default_target_group_key = "litellm"
 }
 
+# Internal ALB: agent → Properties MCP over private subnets (no NAT hairpin to public ALB DNS).
+# CDK registers the MCP ECS service with this target group (SSM: mcp_internal_target_group_arn).
+data "aws_vpc" "selected" {
+  id = local.networking_vpc_id
+}
+
+module "mcp_internal_alb" {
+  source = "../../../../modules/alb"
+
+  name       = "${var.name}-mcp-int"
+  vpc_id     = local.networking_vpc_id
+  subnet_ids = data.terraform_remote_state.networking.outputs.private_subnet_ids
+
+  internal                   = true
+  private_subnet_cidr_blocks = [data.aws_vpc.selected.cidr_block]
+  certificate_arn            = var.certificate_arn
+  waf_arn                    = ""
+  enable_waf_association     = false
+  log_bucket_name            = local.log_bucket_name
+  idle_timeout               = 300
+
+  target_groups = {
+    mcp = {
+      port              = 8765
+      health_check_path = "/api/mcp-properties/health"
+      health_check_port = "8765"
+    }
+  }
+
+  default_target_group_key = "mcp"
+}
+
 module "cdn" {
   source = "../../../../modules/cloudfront-alb"
   count  = var.use_cloudfront ? 1 : 0
@@ -390,6 +422,31 @@ resource "aws_ssm_parameter" "litellm_internal_url" {
   name  = "/ubika/${var.environment}/litellm_internal_url"
   type  = "String"
   value = "https://${module.alb.alb_dns_name}"
+}
+
+# Agent → MCP (FastMCP) via VPC-private internal ALB (Ubika-core AgentAppStack + McpPropertiesStack).
+resource "aws_ssm_parameter" "mcp_properties_internal_base_url" {
+  name  = "/ubika/${var.environment}/mcp_properties_internal_base_url"
+  type  = "String"
+  value = "https://${module.mcp_internal_alb.alb_dns_name}"
+}
+
+resource "aws_ssm_parameter" "mcp_internal_target_group_arn" {
+  name  = "/ubika/${var.environment}/mcp_internal_target_group_arn"
+  type  = "String"
+  value = module.mcp_internal_alb.target_group_arns["mcp"]
+}
+
+resource "aws_ssm_parameter" "mcp_internal_alb_arn" {
+  name  = "/ubika/${var.environment}/mcp_internal_alb_arn"
+  type  = "String"
+  value = module.mcp_internal_alb.alb_arn
+}
+
+resource "aws_ssm_parameter" "mcp_internal_alb_security_group_id" {
+  name  = "/ubika/${var.environment}/mcp_internal_alb_security_group_id"
+  type  = "String"
+  value = module.mcp_internal_alb.alb_security_group_id
 }
 
 

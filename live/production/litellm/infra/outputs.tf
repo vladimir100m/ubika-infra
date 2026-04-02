@@ -12,6 +12,16 @@ output "alb_dns_name" {
   value       = module.alb.alb_dns_name
 }
 
+output "mcp_properties_internal_base_url" {
+  description = "HTTPS base URL for agent→Properties MCP via internal ALB (append /api/mcp-properties/mcp)."
+  value       = "https://${module.mcp_internal_alb.alb_dns_name}"
+}
+
+output "mcp_internal_alb_dns_name" {
+  description = "DNS name of the internal ALB used for Properties MCP only."
+  value       = module.mcp_internal_alb.alb_dns_name
+}
+
 output "cloudfront_domain_name" {
   description = "Domain name of the CloudFront distribution (empty when use_cloudfront = false)."
   value       = var.use_cloudfront ? module.cdn[0].domain_name : ""
