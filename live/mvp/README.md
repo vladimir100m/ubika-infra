@@ -1,6 +1,8 @@
 # MVP (minimal-cost AWS)
 
-Terraform under `live/mvp/` deploys a small VPC (no NAT, no paid interface VPC endpoints, S3 gateway endpoint kept) and a single EC2 instance for Agents / Nginx / LiteLLM-style workloads.
+Terraform under `live/mvp/` deploys a dedicated **VPC** (cost-optimized: **no NAT Gateway**, **no interface VPC endpoints** by default) and a single **EC2** instance that runs **Docker Compose**: **Nginx** (public HTTP edge), **LiteLLM** (proxy API, internal port), and **Postgres**.
+
+---
 
 ## Deploy order
 
@@ -24,6 +26,69 @@ Terraform under `live/mvp/` deploys a small VPC (no NAT, no paid interface VPC e
 
 State bucket defaults to `terraform-mvp-591667019512`. Override with `-var=terraform_state_bucket=...` in the litellm stack if needed.
 
+---
+
+## Networking (MVP)
+
+The MVP stack uses `modules/networking` from `live/mvp/networking/main.tf` with these settings:
+
+| Setting | MVP value | Purpose |
+|--------|-----------|--------|
+| `enable_nat_gateway` | `false` | Avoid NAT Gateway hourly + data charges; workloads that need the internet use a **public subnet** + **IGW** instead. |
+| `enable_interface_vpc_endpoints` | `false` | No paid **interface** endpoints (Secrets Manager, ECR, Logs, STS, etc.); saves per-AZ cost. |
+| `enable_s3_gateway_endpoint` | `true` | **S3 gateway endpoint** (no hourly charge) so S3 traffic can stay on the AWS backbone where applicable. |
+| `enable_vpc_flow_logs` | `false` | No VPC Flow Logs / extra log storage for MVP (enable in the module when you need audit or troubleshooting). |
+
+### What the networking module creates (new VPC)
+
+When `vpc_id` is empty, Terraform creates a **new VPC** (`10.0.0.0/16` by default in the module) and:
+
+- **VPC** — DNS hostnames and DNS support enabled.
+- **Internet Gateway (IGW)** — attachment to that VPC.
+- **Subnets** — typically **two public** and **two private** subnets across two AZs (CIDRs derived via `cidrsubnet` from the VPC block).
+- **Route tables**
+  - **Public**: default route `0.0.0.0/0` → **IGW** (subnets with `map_public_ip_on_launch = true`).
+  - **Private** — with **NAT disabled** (MVP): isolated private route tables **without** a default route to the internet (no NAT Gateway is created). If you later enable NAT in the module, private subnets can use a NAT route instead.
+- **NAT Gateway / Elastic IPs** — **not** created for MVP (`enable_nat_gateway = false`), so no NAT-related resources.
+- **S3 Gateway VPC Endpoint** — `com.amazonaws.<region>.s3`, **Gateway** type, associated with the relevant **route tables** (public + private in the module’s logic) so S3 can be reached without traversing the public internet for that path, at no hourly endpoint fee.
+
+### Optional module features (not used in default MVP)
+
+The same module can also create (when flags are turned on):
+
+- **NAT Gateway(s)** and **EIPs** — for private-subnet egress without public IPs.
+- **Interface VPC endpoints** — `secretsmanager`, `ecr.api`, `ecr.dkr`, `logs`, `sts`, plus a **security group** for endpoint ENIs (`443` from the VPC CIDR).
+- **VPC Flow Logs** — to CloudWatch Logs, with an **IAM role** for log delivery.
+
+MVP does **not** deploy those unless you change the `module "networking"` inputs in `live/mvp/networking/main.tf`.
+
+### Outputs (networking stack)
+
+Useful values for other stacks or docs:
+
+- `vpc_id`
+- `public_subnet_ids`
+- `private_subnet_ids`
+
+The **LiteLLM** stack reads this state via `terraform_remote_state` and places the EC2 instance in a **public subnet** so it can reach Docker registries, GitHub, SSM, etc., without NAT.
+
+---
+
+## Nginx in this infrastructure
+
+**Role:** Nginx is the **only HTTP entrypoint** intended for browsers and external HTTP clients. It listens on **port 80** inside Docker and is mapped to **host port 80**, which matches the AWS **edge** security group (ingress `80` / `443` from configured CIDRs).
+
+**Mission:**
+
+1. **Edge / demarcation** — Terminate **plain HTTP** at Nginx (default `docker-compose` does not configure TLS inside the container). HTTPS at the edge is usually added later (reverse proxy, Cloudflare, ALB, or cert on the host). Until then, clients use `http://<public-ip>/`.
+2. **Reverse proxy to LiteLLM** — All application traffic under `/` is forwarded to the **`litellm`** service on **port 4000** on the Docker network (`proxy_pass http://litellm:4000`), with `Host`, `X-Forwarded-*`, and timeouts suitable for LLM requests.
+3. **Health check** — `GET /health` returns a static **`ok`** response from Nginx itself so load balancers and monitors can verify the edge without hitting the LLM app.
+4. **Stable public surface** — External systems (e.g. Vercel, scripts) target **one host and port** (80); LiteLLM stays **off** the public internet at the security-group level except where allowed by the **litellm** security group rules (VPC + edge SG).
+
+Config file in-repo: `live/mvp/litellm/nginx/nginx.conf` (also uploaded to S3 when using S3 bootstrap).
+
+---
+
 ## AWS profile
 
 MVP Terraform uses the **default provider credential chain** with env vars set by `make init-mvp` / `make apply-mvp`: `AWS_PROFILE=ubika-terraform` and `AWS_SDK_LOAD_CONFIG=1` (so SSO and `~/.aws/config` behave like the AWS CLI).
@@ -46,16 +111,24 @@ make apply-mvp MVP_SSH_INGRESS_CIDR=203.0.113.88/32 TF_APPLY_ARGS=-auto-approve
 
 Replace `203.0.113.88/32` with your address (see `curl -s https://checkip.amazonaws.com` + `/32`). Omit `MVP_SSH_INGRESS_CIDR` if you only use Session Manager.
 
+---
+
 ## Vercel → EC2
 
-- **Direct**: security group `edge` allows TCP `80` and `443` from `var.edge_ingress_cidrs` (default `0.0.0.0/0`). Use strong app-layer auth; Vercel hobby tier has no fixed egress IPs.
+- **Direct**: the **edge** security group allows TCP **80** and **443** from `var.edge_ingress_cidrs` (default `0.0.0.0/0`). Traffic hits **Nginx** on **80** first. Use strong app-layer auth; Vercel hobby tier has no fixed egress IPs.
 - **Cloudflare Tunnel**: optional `cloudflared` service in `docker-compose.yaml`; you can tighten `edge_ingress_cidrs` to VPC-only if all public traffic goes through the tunnel (document your chosen ports).
 - **API Gateway / ALB**: add later in the same VPC and point rules at the instance or target group.
 
-## Security groups
+---
 
-- **edge**: external callers → Nginx / Agent ports only.
-- **litellm**: LiteLLM port restricted to VPC CIDR and referencing the edge SG (not open to the world).
+## Security groups (LiteLLM stack)
+
+These are defined in `live/mvp/litellm/infra`, not in the networking module:
+
+- **edge** — Ingress from the internet (or chosen CIDRs) to **Nginx / agent** ports (e.g. **80**, **443**); optional **22** when `ssh_ingress_cidrs` is set. Egress allow-all for pulls and outbound services.
+- **litellm** — LiteLLM’s port (**4000**) reachable from the **VPC CIDR** and from the **edge** security group (same instance), **not** open to `0.0.0.0/0`.
+
+---
 
 ## Connecting to the EC2 instance
 
@@ -69,9 +142,13 @@ Replace `203.0.113.88/32` with your address (see `curl -s https://checkip.amazon
    - `ssh_ingress_cidrs` — e.g. `["203.0.113.10/32"]` (your public IP); required for SSH from the internet.
    Then: `chmod 600 live/mvp/litellm/mvp-litellm-ec2.pem` and `ssh -i live/mvp/litellm/mvp-litellm-ec2.pem ec2-user@<public-dns-or-ip>`.
 
+---
+
 ## CloudWatch Logs
 
 The litellm stack creates log group `/ec2/<name>/system` (see `cloudwatch_log_retention_days`) and installs the **CloudWatch Agent** on boot to ship `/var/log/messages` and `/var/log/cloud-init-output.log`. Streams are named with `{instance_id}` placeholders. Adjust `local.cw_agent_json` in `live/mvp/litellm/infra/main.tf` to add files or use the agent’s metrics support.
+
+---
 
 ## LiteLLM on EC2 (Docker Compose)
 
@@ -112,9 +189,13 @@ sudo -E bash bootstrap-litellm-manual.sh
 
 **Note:** Docs recommend pinning image tags (e.g. `main-stable`) for production; the compose file uses `docker.litellm.ai/berriai/litellm-database:main-stable`.
 
+---
+
 ## Egress / NAT
 
 The EC2 instance is in a **public subnet** with a **public IPv4** so it can pull images and use outbound-only patterns (e.g. tunnel) **without a NAT Gateway**. Private subnets in this VPC have **no** default route to the internet unless you add NAT or endpoints later.
+
+---
 
 ## Second EC2
 
