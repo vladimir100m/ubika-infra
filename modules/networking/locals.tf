@@ -1,7 +1,7 @@
 locals {
   # nat_gateway_count = var.disable_outbound_network_access ? 0 : 1
   nat_gateway_count = var.disable_outbound_network_access || !var.enable_nat_gateway ? 0 : (var.single_nat_gateway ? 1 : 2)
-  
+
   creating_new_vpc = length(trimspace(var.vpc_id)) == 0
   final_vpc_id     = local.creating_new_vpc ? aws_vpc.new[0].id : data.aws_vpc.existing[0].id
 }
@@ -73,7 +73,10 @@ locals {
 }
 
 locals {
-  create_endpoints = (local.creating_new_vpc || var.create_vpc_endpoints_in_existing_vpc)
+  vpc_endpoint_scope = local.creating_new_vpc || var.create_vpc_endpoints_in_existing_vpc
+  # Split: S3 gateway is free; interface endpoints have hourly cost per AZ.
+  create_interface_vpc_endpoints = local.vpc_endpoint_scope && var.enable_interface_vpc_endpoints
+  create_s3_gateway_endpoint     = local.vpc_endpoint_scope && var.enable_s3_gateway_endpoint
 }
 
 data "aws_route_tables" "existing_vpc_all" {

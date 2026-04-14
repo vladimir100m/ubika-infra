@@ -54,3 +54,21 @@ variable "single_nat_gateway" {
   type        = bool
   default     = true
 }
+
+variable "enable_interface_vpc_endpoints" {
+  description = "Create Interface VPC Endpoints (Secrets Manager, ECR, CloudWatch Logs, STS). Disable for minimal-cost MVP when not needed."
+  type        = bool
+  default     = true
+}
+
+variable "enable_s3_gateway_endpoint" {
+  description = "Create the S3 Gateway VPC Endpoint (no hourly charge). Often kept enabled for private subnet S3 access without NAT."
+  type        = bool
+  default     = true
+}
+
+variable "enable_vpc_flow_logs" {
+  description = "Publish VPC flow logs to CloudWatch Logs. Disable for MVP to avoid log storage cost."
+  type        = bool
+  default     = true
+}

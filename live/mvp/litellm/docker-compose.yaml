@@ -1,0 +1,49 @@
+# Aligned with https://docs.litellm.ai/docs/proxy/deploy (Docker Compose + DB).
+# Bootstrap copies this from S3; edit config.yaml / .env on the instance or re-upload to S3 + taint instance.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: litellm
+      POSTGRES_DB: litellm
+    volumes:
+      - litellm-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm -d litellm -h localhost -p 5432"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 15s
+    restart: unless-stopped
+
+  litellm:
+    image: docker.litellm.ai/berriai/litellm-database:main-stable
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      LITELLM_PORT: "4000"
+      DATABASE_URL: postgresql://litellm:litellm@db:5432/litellm
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    expose:
+      - "4000"
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - litellm
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+
+volumes:
+  litellm-db-data:

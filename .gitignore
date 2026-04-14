@@ -16,6 +16,8 @@ crash.*.log
 
 # ─── Environment / Secrets ───────────────────────────────────
 # [';']
+# MVP litellm: Terraform-generated SSH private keys (never commit)
+live/mvp/litellm/*-ec2.pem
 
 # ─── Python ──────────────────────────────────────────────────
 *.pyc

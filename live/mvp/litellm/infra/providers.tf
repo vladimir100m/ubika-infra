@@ -10,36 +10,26 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.0"
-    }
     tls = {
       source  = "hashicorp/tls"
       version = "~> 4.0"
     }
-    archive = {
-      source  = "hashicorp/archive"
-      version = "~> 2.0"
-    }
-    null = {
-      source  = "hashicorp/null"
-      version = "~> 3.0"
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.4"
     }
   }
 }
 
 provider "aws" {
-  region  = var.aws_region
-  profile = "ubika-terraform"
+  region = var.aws_region
+  # Auth: use AWS_PROFILE (see Makefile init-mvp / apply-mvp).
 
   default_tags {
     tags = {
       project     = "ubika-infra"
       managed_by  = "terraform"
       environment = var.environment
-      workload    = "litellm"
-      layer       = "infra"
     }
   }
 }

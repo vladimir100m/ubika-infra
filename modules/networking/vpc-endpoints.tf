@@ -1,7 +1,7 @@
 data "aws_region" "current" {}
 
 resource "aws_security_group" "vpc_endpoints_sg" {
-  count       = local.create_endpoints ? 1 : 0
+  count       = local.create_interface_vpc_endpoints ? 1 : 0
   name        = "${var.name}-vpc-endpoints-sg"
   description = "Security group for Interface VPC Endpoints"
   vpc_id      = local.final_vpc_id
@@ -22,7 +22,7 @@ resource "aws_security_group" "vpc_endpoints_sg" {
 }
 
 resource "aws_vpc_endpoint" "s3_gateway" {
-  count             = local.create_endpoints ? 1 : 0
+  count             = local.create_s3_gateway_endpoint ? 1 : 0
   vpc_id            = local.final_vpc_id
   service_name      = "com.amazonaws.${data.aws_region.current.name}.s3"
   vpc_endpoint_type = "Gateway"
@@ -30,7 +30,7 @@ resource "aws_vpc_endpoint" "s3_gateway" {
 }
 
 resource "aws_vpc_endpoint" "secretsmanager" {
-  count               = local.create_endpoints ? 1 : 0
+  count               = local.create_interface_vpc_endpoints ? 1 : 0
   vpc_id              = local.final_vpc_id
   service_name        = "com.amazonaws.${data.aws_region.current.name}.secretsmanager"
   vpc_endpoint_type   = "Interface"
@@ -40,7 +40,7 @@ resource "aws_vpc_endpoint" "secretsmanager" {
 }
 
 resource "aws_vpc_endpoint" "ecr" {
-  count               = local.create_endpoints ? 1 : 0
+  count               = local.create_interface_vpc_endpoints ? 1 : 0
   vpc_id              = local.final_vpc_id
   service_name        = "com.amazonaws.${data.aws_region.current.name}.ecr.api"
   vpc_endpoint_type   = "Interface"
@@ -50,7 +50,7 @@ resource "aws_vpc_endpoint" "ecr" {
 }
 
 resource "aws_vpc_endpoint" "ecr_docker" {
-  count               = local.create_endpoints ? 1 : 0
+  count               = local.create_interface_vpc_endpoints ? 1 : 0
   vpc_id              = local.final_vpc_id
   service_name        = "com.amazonaws.${data.aws_region.current.name}.ecr.dkr"
   vpc_endpoint_type   = "Interface"
@@ -60,7 +60,7 @@ resource "aws_vpc_endpoint" "ecr_docker" {
 }
 
 resource "aws_vpc_endpoint" "cloudwatch_logs" {
-  count               = local.create_endpoints ? 1 : 0
+  count               = local.create_interface_vpc_endpoints ? 1 : 0
   vpc_id              = local.final_vpc_id
   service_name        = "com.amazonaws.${data.aws_region.current.name}.logs"
   vpc_endpoint_type   = "Interface"
@@ -70,7 +70,7 @@ resource "aws_vpc_endpoint" "cloudwatch_logs" {
 }
 
 resource "aws_vpc_endpoint" "sts" {
-  count               = local.create_endpoints ? 1 : 0
+  count               = local.create_interface_vpc_endpoints ? 1 : 0
   vpc_id              = local.final_vpc_id
   service_name        = "com.amazonaws.${data.aws_region.current.name}.sts"
   vpc_endpoint_type   = "Interface"

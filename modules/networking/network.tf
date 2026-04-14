@@ -79,8 +79,8 @@ resource "aws_route_table_association" "public" {
 }
 
 resource "aws_route_table_association" "private" {
-  count     = local.creating_new_vpc ? length(aws_subnet.private) : 0
-  subnet_id = aws_subnet.private[count.index].id
+  count          = local.creating_new_vpc ? length(aws_subnet.private) : 0
+  subnet_id      = aws_subnet.private[count.index].id
   route_table_id = local.nat_gateway_count > 0 ? element(aws_route_table.private_with_nat[*].id, count.index) : aws_route_table.private_isolated[0].id
 }
 
@@ -89,13 +89,13 @@ data "aws_availability_zones" "available" {
 }
 
 resource "aws_cloudwatch_log_group" "vpc_flow_logs" {
-  count             = local.creating_new_vpc ? 1 : 0
+  count             = local.creating_new_vpc && var.enable_vpc_flow_logs ? 1 : 0
   name_prefix       = "/aws/vpc/${var.name}-flow-logs"
   retention_in_days = 365
 }
 
 resource "aws_flow_log" "this" {
-  count                    = local.creating_new_vpc ? 1 : 0
+  count                    = local.creating_new_vpc && var.enable_vpc_flow_logs ? 1 : 0
   log_destination          = aws_cloudwatch_log_group.vpc_flow_logs[0].arn
   log_destination_type     = "cloud-watch-logs"
   vpc_id                   = aws_vpc.new[0].id

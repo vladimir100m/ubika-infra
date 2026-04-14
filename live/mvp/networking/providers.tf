@@ -14,8 +14,9 @@ terraform {
 }
 
 provider "aws" {
-  region  = var.aws_region
-  profile = "ubika-terraform"
+  region = var.aws_region
+  # Auth: use AWS_PROFILE (see Makefile init-mvp / apply-mvp). SSO lives in ~/.aws/config;
+  # AWS_SDK_LOAD_CONFIG=1 ensures the SDK loads it the same way as the AWS CLI.
 
   default_tags {
     tags = {

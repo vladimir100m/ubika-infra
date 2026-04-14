@@ -1,0 +1,10 @@
+# LiteLLM proxy config — see https://docs.litellm.ai/docs/proxy/deploy
+# Set OPENAI_API_KEY in /opt/litellm/.env (or remove the model below).
+
+model_list:
+  - model_name: gpt-3.5-turbo
+    litellm_params:
+      model: openai/gpt-3.5-turbo
+      api_key: os.environ/OPENAI_API_KEY
+
+# LITELLM_MASTER_KEY and LITELLM_SALT_KEY come from .env (see deploy docs).
