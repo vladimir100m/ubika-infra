@@ -1,4 +1,4 @@
-.PHONY: init-mvp apply-mvp check-mvp-aws
+.PHONY: init-mvp apply-mvp check-mvp-aws deploy-mvp-nginx-edge
 
 MVPNET := live/mvp/networking
 MVPLIT := live/mvp/litellm/infra
@@ -35,3 +35,8 @@ init-mvp: check-mvp-aws
 apply-mvp:
 	cd $(MVPNET) && $(MVP_AWS_SHELL) terraform apply -input=false $(TF_APPLY_ARGS)
 	cd $(MVPLIT) && $(MVP_AWS_SHELL) terraform apply -input=false $(TF_APPLY_ARGS) $(if $(MVP_SSH_INGRESS_CIDR),-var='ssh_ingress_cidrs=["$(MVP_SSH_INGRESS_CIDR)"]',)
+
+## Build the Nginx edge image and run it on the Nginx EC2 (replaces stock nginx container from user-data).
+## Uses live/mvp/litellm/mvp-litellm-ec2.pem and terraform outputs for IPs. Run after apply-mvp.
+deploy-mvp-nginx-edge:
+	cd live/mvp/litellm && $(MAKE) deploy-nginx-edge-docker KEY=mvp-litellm-ec2.pem

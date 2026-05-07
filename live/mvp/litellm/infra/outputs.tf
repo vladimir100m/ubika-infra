@@ -5,7 +5,7 @@ output "ssh_private_key_pem_path" {
 }
 
 output "ssh_key_pair_name" {
-  description = "EC2 key pair name attached to the instance."
+  description = "EC2 key pair name attached to both instances."
   value       = length(aws_key_pair.generated) > 0 ? aws_key_pair.generated[0].key_name : (var.ec2_key_name != "" ? var.ec2_key_name : null)
 }
 
@@ -24,7 +24,7 @@ output "config_bucket_id" {
 }
 
 output "litellm_manual_bootstrap_hint" {
-  description = "If /opt/litellm is missing, run scripts/bootstrap-litellm-manual.sh on the instance with LITELLM_CONFIG_BUCKET set to config_bucket_id, or run terraform apply to replace the instance so user_data runs again."
+  description = "If /opt/litellm is missing, run scripts/bootstrap-litellm-manual.sh on the LiteLLM instance with LITELLM_CONFIG_BUCKET set to config_bucket_id, or run terraform apply to replace the instance so user_data runs again."
   value       = "export LITELLM_CONFIG_BUCKET=${module.config_bucket.bucket_id} AWS_REGION=${var.aws_region}"
 }
 
@@ -33,17 +33,40 @@ output "github_deploy_public_key_openssh" {
   value       = var.use_git_clone ? tls_private_key.github_deploy[0].public_key_openssh : null
 }
 
+output "litellm_instance_id" {
+  description = "LiteLLM + Postgres EC2 instance ID."
+  value       = module.litellm_ec2.id
+}
+
+output "nginx_instance_id" {
+  description = "Nginx edge EC2 instance ID."
+  value       = module.nginx_ec2.id
+}
+
+# Backward-compatible name: was a single instance; now the browser-facing host.
 output "ec2_instance_id" {
-  value = aws_instance.this.id
+  description = "Deprecated alias: use nginx_instance_id for the edge host."
+  value       = module.nginx_ec2.id
+}
+
+output "litellm_private_ip" {
+  description = "Private IPv4 of the LiteLLM host (upstream for Nginx)."
+  value       = module.litellm_ec2.private_ip
 }
 
 output "ec2_private_ip" {
-  value = aws_instance.this.private_ip
+  description = "Same as litellm_private_ip (LiteLLM host)."
+  value       = module.litellm_ec2.private_ip
+}
+
+output "nginx_public_ip" {
+  description = "Public IPv4 of the Nginx host — use http://<ip>/ in the browser."
+  value       = module.nginx_ec2.public_ip
 }
 
 output "ec2_public_ip" {
-  description = "Public IPv4 for outbound (e.g. Docker pulls). Restrict edge ingress in SGs if using tunnel-only access patterns."
-  value       = aws_instance.this.public_ip
+  description = "Public IPv4 of the Nginx edge (same as nginx_public_ip)."
+  value       = module.nginx_ec2.public_ip
 }
 
 output "edge_security_group_id" {

@@ -1,6 +1,13 @@
 # MVP (minimal-cost AWS)
 
-Terraform under `live/mvp/` deploys a dedicated **VPC** (cost-optimized: **no NAT Gateway**, **no interface VPC endpoints** by default) and a single **EC2** instance that runs **Docker Compose**: **Nginx** (public HTTP edge), **LiteLLM** (proxy API, internal port), and **Postgres**.
+Terraform under `live/mvp/` deploys a dedicated **VPC** (cost-optimized: **no NAT Gateway**, **no interface VPC endpoints** by default) and **two EC2 instances** in a **public subnet**:
+
+| Instance | Default type | Role |
+|----------|----------------|------|
+| **Nginx edge** | `t3.small` (`var.nginx_instance_type`) | Public HTTP(S) reverse proxy on port **80** (Docker runs `nginx:1.27-alpine` from user-data; optional custom image via Makefile). |
+| **LiteLLM** | `c7i-flex.large` (`var.instance_type`) | **Postgres** + **LiteLLM** only; publishes **4000** to the VPC for the Nginx host. |
+
+IAM and EC2 are composed from reusable modules: [`modules/ec2-instance-profile-ssm`](../../modules/ec2-instance-profile-ssm) (SSM instance profile) and [`modules/ec2-instance`](../../modules/ec2-instance). Both instances share the **same** EC2 key pair (PEM from Terraform when `generate_ssh_key_pair` is true).
 
 ---
 
@@ -24,7 +31,30 @@ Terraform under `live/mvp/` deploys a dedicated **VPC** (cost-optimized: **no NA
    terraform apply
    ```
 
+3. **Outputs** (browser URL and SSH target for the edge):
+
+   ```bash
+   cd live/mvp/litellm/infra
+   terraform output -raw nginx_public_ip    # open http://<ip>/ in a browser
+   terraform output -raw litellm_private_ip
+   ```
+
+4. **Optional — custom Nginx image** (same PEM as Terraform; from repo root):
+
+   ```bash
+   make deploy-mvp-nginx-edge
+   ```
+
+   This builds [`live/mvp/litellm/nginx-edge/Dockerfile`](litellm/nginx-edge/Dockerfile), copies the image to the **Nginx** host over SSH, and runs it with `LITELLM_HOST` set to the LiteLLM instance **private** IP from Terraform outputs. Requires `docker` and `ssh` on your laptop and `live/mvp/litellm/mvp-litellm-ec2.pem`.
+
 State bucket defaults to `terraform-mvp-591667019512`. Override with `-var=terraform_state_bucket=...` in the litellm stack if needed.
+
+---
+
+## Terraform modules (LiteLLM stack)
+
+- **`modules/ec2-instance-profile-ssm`** — EC2 trust role, `AmazonSSMManagedInstanceCore`, instance profile. The litellm stack attaches extra inline policies (S3 config bucket read, CloudWatch Logs for the agent, optional GitHub deploy key read).
+- **`modules/ec2-instance`** — Opinionated `aws_instance`: gp3 root volume, IMDSv2 required, tags.
 
 ---
 
@@ -70,22 +100,20 @@ Useful values for other stacks or docs:
 - `public_subnet_ids`
 - `private_subnet_ids`
 
-The **LiteLLM** stack reads this state via `terraform_remote_state` and places the EC2 instance in a **public subnet** so it can reach Docker registries, GitHub, SSM, etc., without NAT.
+The **LiteLLM** stack reads this state via `terraform_remote_state` and places **both** EC2 instances in a **public subnet** so they can pull images, reach SSM, and (for LiteLLM) clone or read S3 without NAT.
 
 ---
 
 ## Nginx in this infrastructure
 
-**Role:** Nginx is the **only HTTP entrypoint** intended for browsers and external HTTP clients. It listens on **port 80** inside Docker and is mapped to **host port 80**, which matches the AWS **edge** security group (ingress `80` / `443` from configured CIDRs).
+**Role:** Nginx runs on a **dedicated** EC2 instance (`t3.small` by default). It is the **HTTP entry** for browsers and external clients: security group **edge** only attaches to this host (ports **80** / **443**, optional **22** for SSH).
 
 **Mission:**
 
-1. **Edge / demarcation** — Terminate **plain HTTP** at Nginx (default `docker-compose` does not configure TLS inside the container). HTTPS at the edge is usually added later (reverse proxy, Cloudflare, ALB, or cert on the host). Until then, clients use `http://<public-ip>/`.
-2. **Reverse proxy to LiteLLM** — All application traffic under `/` is forwarded to the **`litellm`** service on **port 4000** on the Docker network (`proxy_pass http://litellm:4000`), with `Host`, `X-Forwarded-*`, and timeouts suitable for LLM requests.
-3. **Health check** — `GET /health` returns a static **`ok`** response from Nginx itself so load balancers and monitors can verify the edge without hitting the LLM app.
-4. **Stable public surface** — External systems (e.g. Vercel, scripts) target **one host and port** (80); LiteLLM stays **off** the public internet at the security-group level except where allowed by the **litellm** security group rules (VPC + edge SG).
-
-Config file in-repo: `live/mvp/litellm/nginx/nginx.conf` (also uploaded to S3 when using S3 bootstrap).
+1. **Edge / demarcation** — Terminate **plain HTTP** at Nginx (TLS is a later step: Cloudflare, ALB, or certs). Clients use `http://<nginx_public_ip>/`.
+2. **Reverse proxy to LiteLLM** — Traffic to `/` is forwarded to **`http://<litellm_private_ip>:4000`** (cross-host). Terraform renders [`live/mvp/litellm/infra/nginx-edge.conf.tpl`](litellm/infra/nginx-edge.conf.tpl) with the LiteLLM private IP and uploads it to S3 as `bootstrap/nginx-edge.conf`; **Nginx instance user-data** downloads it and runs `nginx:1.27-alpine` with that file mounted.
+3. **Health check** — `GET /health` returns **`ok`** from Nginx without hitting LiteLLM.
+4. **Optional Docker image** — [`live/mvp/litellm/nginx-edge/`](litellm/nginx-edge/) contains a **Dockerfile** and `default.conf.template` using `LITELLM_HOST` (env). Use `make deploy-mvp-nginx-edge` from the repo root to rebuild and replace the container on the Nginx host.
 
 ---
 
@@ -103,100 +131,116 @@ cd live/mvp/networking && terraform init -backend-config=backend.hcl
 
 Override the profile: `make check-mvp-aws MVP_AWS_PROFILE=my-profile`.
 
-From the repo root, to **open SSH (port 22) from your public IP** on the litellm stack only:
+From the repo root, to **open SSH (port 22) from your public IP** on the **Nginx** host (edge SG):
 
 ```bash
 make apply-mvp MVP_SSH_INGRESS_CIDR=203.0.113.88/32 TF_APPLY_ARGS=-auto-approve
 ```
 
-Replace `203.0.113.88/32` with your address (see `curl -s https://checkip.amazonaws.com` + `/32`). Omit `MVP_SSH_INGRESS_CIDR` if you only use Session Manager.
+Replace `203.0.113.88/32` with your address (see `curl -s https://checkip.amazonaws.com` + `/32`). Omit `MVP_SSH_INGRESS_CIDR` if you only use Session Manager. SSH uses the **Nginx** instance public IP (same PEM as LiteLLM).
 
 ---
 
 ## Vercel → EC2
 
-- **Direct**: the **edge** security group allows TCP **80** and **443** from `var.edge_ingress_cidrs` (default `0.0.0.0/0`). Traffic hits **Nginx** on **80** first. Use strong app-layer auth; Vercel hobby tier has no fixed egress IPs.
-- **Cloudflare Tunnel**: optional `cloudflared` service in `docker-compose.yaml`; you can tighten `edge_ingress_cidrs` to VPC-only if all public traffic goes through the tunnel (document your chosen ports).
-- **API Gateway / ALB**: add later in the same VPC and point rules at the instance or target group.
+- **Direct**: the **edge** security group allows TCP **80** and **443** from `var.edge_ingress_cidrs` (default `0.0.0.0/0`). Traffic hits the **Nginx** EC2 on **80** first. Use strong app-layer auth; Vercel hobby tier has no fixed egress IPs.
+- **Cloudflare Tunnel**: optional `cloudflared` on the **Nginx** host or in compose elsewhere; you can tighten `edge_ingress_cidrs` to VPC-only if all public traffic goes through the tunnel.
+- **API Gateway / ALB**: add later in the same VPC and point rules at the Nginx instance or target group.
 
 ---
 
 ## Security groups (LiteLLM stack)
 
-These are defined in `live/mvp/litellm/infra`, not in the networking module:
+Defined in `live/mvp/litellm/infra`:
 
-- **edge** — Ingress from the internet (or chosen CIDRs) to **Nginx / agent** ports (e.g. **80**, **443**); optional **22** when `ssh_ingress_cidrs` is set. Egress allow-all for pulls and outbound services.
-- **litellm** — LiteLLM’s port (**4000**) reachable from the **VPC CIDR** and from the **edge** security group (same instance), **not** open to `0.0.0.0/0`.
+- **edge** — Attached **only** to the **Nginx** EC2. Ingress: **80**, **443** from configured CIDRs; optional **22** from `ssh_ingress_cidrs`. Egress: all.
+- **litellm** — Attached **only** to the **LiteLLM** EC2. Ingress: **4000** from the **VPC CIDR** and from the **edge** security group (so the Nginx host can connect). Not open to `0.0.0.0/0` for port 4000.
 
 ---
 
-## Connecting to the EC2 instance
+## Connecting to the EC2 instances
 
-**SSH was not enabled by default:** the security group only allowed HTTP(S). Console “SSH” / **EC2 Instance Connect** still needs **TCP 22** open and usually an **EC2 key pair**.
+**SSH (optional):** open **TCP 22** on the **edge** SG and use the shared PEM against the **Nginx** instance’s **public** IP (or LiteLLM’s public IP if you rely on SSM only — LiteLLM does not need SSH open for public access).
 
-1. **Recommended (no inbound ports): [Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html)**  
-   EC2 → instance → **Connect** → **Session Manager**. Requires the instance profile (`AmazonSSMManagedInstanceCore`), outbound internet in a public subnet, and the SSM agent (preinstalled on AL2023).
+1. **Recommended (no inbound ports): [Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html)** on either instance (same IAM profile: SSM).
 
 2. **Classic SSH** — set in `live/mvp/litellm/infra` (then `terraform apply`):
-   - `generate_ssh_key_pair` (default **true**) — Terraform creates an RSA key, registers **`${name}-ec2`** in EC2, and writes the private key to **`live/mvp/litellm/<name>-ec2.pem`** (gitignored). Use `-var=generate_ssh_key_pair=false` and `ec2_key_name=...` to use an existing key instead.
-   - `ssh_ingress_cidrs` — e.g. `["203.0.113.10/32"]` (your public IP); required for SSH from the internet.
-   Then: `chmod 600 live/mvp/litellm/mvp-litellm-ec2.pem` and `ssh -i live/mvp/litellm/mvp-litellm-ec2.pem ec2-user@<public-dns-or-ip>`.
+   - `generate_ssh_key_pair` (default **true**) — Terraform writes **`live/mvp/litellm/<name>-ec2.pem`** (gitignored). **Both** instances use this key.
+   - `ssh_ingress_cidrs` — opens **22** on the **edge** SG (Nginx host).
+
+   ```bash
+   chmod 600 live/mvp/litellm/mvp-litellm-ec2.pem
+   ssh -i live/mvp/litellm/mvp-litellm-ec2.pem ec2-user@<nginx-public-ip>
+   ```
+
+### Session Manager: `docker: command not found`
+
+User data installs **Docker** and **Compose** on first boot. If **`docker` is missing**, see earlier notes: install **Docker** before **`docker-compose-plugin`** in one transaction can fail on some AL2023 AMIs. The litellm templates [`user-data-litellm.sh.tpl`](litellm/infra/user-data-litellm.sh.tpl) and [`user-data-nginx.sh.tpl`](litellm/infra/user-data-nginx.sh.tpl) follow the split install + Compose fallback pattern.
+
+**Fix on a broken instance (as root):**
+
+```bash
+dnf install -y docker amazon-cloudwatch-agent awscli
+systemctl enable --now docker
+dnf install -y docker-compose-plugin || {
+  mkdir -p /usr/local/lib/docker/cli-plugins
+  curl -fsSL "https://github.com/docker/compose/releases/download/v2.32.4/docker-compose-linux-$(uname -m)" \
+    -o /usr/local/lib/docker/cli-plugins/docker-compose
+  chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+}
+docker --version && docker compose version
+```
 
 ---
 
 ## CloudWatch Logs
 
-The litellm stack creates log group `/ec2/<name>/system` (see `cloudwatch_log_retention_days`) and installs the **CloudWatch Agent** on boot to ship `/var/log/messages` and `/var/log/cloud-init-output.log`. Streams are named with `{instance_id}` placeholders. Adjust `local.cw_agent_json` in `live/mvp/litellm/infra/main.tf` to add files or use the agent’s metrics support.
+Log group `/ec2/<name>/system` (see `cloudwatch_log_retention_days`) and the **CloudWatch Agent** on **both** instances ship `/var/log/messages` and `/var/log/cloud-init-output.log`. Adjust `local.cw_agent_json` in [`live/mvp/litellm/infra/main.tf`](litellm/infra/main.tf) to add files.
 
 ---
 
 ## LiteLLM on EC2 (Docker Compose)
 
-Deployment follows [LiteLLM: Docker, Helm, Terraform](https://docs.litellm.ai/docs/proxy/deploy): **Postgres** + **`litellm-database`** image + **Nginx** on port 80 proxying to the proxy on 4000.
+Deployment follows [LiteLLM: Docker, Helm, Terraform](https://docs.litellm.ai/docs/proxy/deploy): **Postgres** + **`litellm-database`** on the **LiteLLM** host; **Nginx** is **not** in this compose file — it runs on the separate EC2. LiteLLM publishes **`4000:4000`** so the Nginx host can reach **`private_ip:4000`**.
 
 ### Git clone (default)
 
 With **`use_git_clone = true`** (default in `live/mvp/litellm/infra`):
 
-1. Terraform creates an **ED25519 deploy key**, stores the **private key** in **SSM Parameter Store** (`SecureString`), and grants the EC2 role **`ssm:GetParameter`** on that parameter only. The **public key** is an output: **`github_deploy_public_key_openssh`**.
-2. **Before the instance first clones successfully**, add that public key in GitHub: **repository → Settings → Deploy keys → Add deploy key** (read-only). If the instance already booted and clone failed, add the key and **replace the instance** or fix manually on the host (`git clone` / `git pull` in `/opt/ubika-infra`).
-3. **User data** installs Docker, the **Compose plugin**, CloudWatch agent, and **git**; fetches the deploy key from SSM; clones **`git_repo_ssh_url`** (default `git@github.com:vladimir100m/ubika-infra.git`) to **`git_clone_path`** (default `/opt/ubika-infra`); runs **`docker compose up -d`** in **`git_compose_relative_path`** (default `live/mvp/litellm`).
-4. On first boot, if `.env` is missing under that compose directory, a **placeholder** is created. **Edit it on the instance** (Session Manager): set **`LITELLM_MASTER_KEY`**, **`LITELLM_SALT_KEY`**, and **`OPENAI_API_KEY`**, then:
+1. Terraform creates an **ED25519 deploy key** in SSM; output **`github_deploy_public_key_openssh`**.
+2. Add the deploy key in GitHub before first successful clone on the **LiteLLM** instance.
+3. User data on the **LiteLLM** instance clones the repo and runs **`docker compose up -d`** under **`git_compose_relative_path`** (default `live/mvp/litellm`).
+4. The **Nginx** instance is created after the LiteLLM instance; its user-data pulls **`bootstrap/nginx-edge.conf`** (upstream = LiteLLM private IP) and starts Nginx.
 
-   ```bash
-   cd /opt/ubika-infra/live/mvp/litellm && sudo docker compose up -d
-   ```
+Placeholder `.env` on first boot; edit on the **LiteLLM** host (Session Manager), then:
 
-Override clone URL, branch, or paths with `-var='git_repo_ssh_url=...'`, `git_branch`, `git_clone_path`, `git_compose_relative_path`.
+```bash
+cd /opt/ubika-infra/live/mvp/litellm && sudo docker compose up -d
+```
+
+If you **replace** the LiteLLM instance and its **private IP** changes, run **`terraform apply`** so `nginx-edge.conf` in S3 updates, then **replace the Nginx instance** or re-run **`make deploy-mvp-nginx-edge`**, or on the Nginx host re-fetch S3 and restart the container.
 
 ### S3-only bootstrap (optional)
 
-Set **`use_git_clone = false`**. Then Terraform uploads `docker-compose.yaml`, `config/config.yaml`, and `nginx/nginx.conf` to the **config S3 bucket** under `bootstrap/`, and **user data** uses `aws s3 cp` into `/opt/litellm` and runs **`docker compose up -d`** there (same placeholder `.env` behavior under `/opt/litellm`).
+Set **`use_git_clone = false`**. Terraform uploads `docker-compose.yaml` and `config/config.yaml` to S3; **`bootstrap/nginx-edge.conf`** is generated from Terraform with the LiteLLM private IP. User-data on each role pulls the relevant objects.
 
-To change compose or config for future boots, update files in this repo, run `terraform apply`, then replace the instance or sync files manually and `docker compose up -d` again.
-
-**If `/opt/litellm` is missing:** the current instance may have been created **before** bootstrap was added, or **user data failed** early (check `sudo tail -200 /var/log/cloud-init-output.log` and `/var/log/litellm-bootstrap.log`). Fix: **`terraform apply`** so the instance is **replaced** and new user data runs, or run the manual script on the server:
+**If `/opt/litellm` is missing** on the LiteLLM host, run [`scripts/bootstrap-litellm-manual.sh`](litellm/scripts/bootstrap-litellm-manual.sh) (compose + config only; no Nginx on that box).
 
 ```bash
-# from repo, get bucket name:
 cd live/mvp/litellm/infra && terraform output -raw config_bucket_id
-
-# on the instance (Session Manager), after copying scripts/bootstrap-litellm-manual.sh or pasting its contents:
-export LITELLM_CONFIG_BUCKET="<that-bucket-id>"
-export AWS_REGION="us-east-1"
-sudo -E bash bootstrap-litellm-manual.sh
+# on LiteLLM instance:
+export LITELLM_CONFIG_BUCKET="<bucket>"
+sudo -E bash /path/to/bootstrap-litellm-manual.sh
 ```
-
-**Note:** Docs recommend pinning image tags (e.g. `main-stable`) for production; the compose file uses `docker.litellm.ai/berriai/litellm-database:main-stable`.
 
 ---
 
 ## Egress / NAT
 
-The EC2 instance is in a **public subnet** with a **public IPv4** so it can pull images and use outbound-only patterns (e.g. tunnel) **without a NAT Gateway**. Private subnets in this VPC have **no** default route to the internet unless you add NAT or endpoints later.
+Both instances use a **public subnet** and **public IPv4** for outbound traffic (pulls, SSM, Git) **without a NAT Gateway**.
 
 ---
 
-## Second EC2
+## Second EC2 or more
 
-Reuse `terraform_remote_state` for `mvp/networking` and attach instances to `private_subnet_ids` or `public_subnet_ids` as needed. Private subnets without NAT still need a path for Docker Hub or use ECR + endpoints.
+Reuse `terraform_remote_state` for `mvp/networking` and attach instances to `public_subnet_ids` or `private_subnet_ids` as needed. The reusable EC2 modules live under `modules/ec2-instance-profile-ssm` and `modules/ec2-instance`.

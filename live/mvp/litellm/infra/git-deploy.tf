@@ -30,6 +30,6 @@ resource "aws_iam_role_policy" "ssm_github_deploy_key" {
   count = var.use_git_clone ? 1 : 0
 
   name   = "${var.name}-ssm-github-deploy-key"
-  role   = aws_iam_role.ec2.id
+  role   = module.ec2_ssm.iam_role_name
   policy = data.aws_iam_policy_document.ssm_github_deploy_key[0].json
 }

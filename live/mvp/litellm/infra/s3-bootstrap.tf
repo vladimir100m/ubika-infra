@@ -12,9 +12,13 @@ resource "aws_s3_object" "litellm_config_yaml" {
   etag   = filemd5("${path.module}/../config/config.yaml")
 }
 
-resource "aws_s3_object" "litellm_nginx" {
+# Templated after LiteLLM EC2 exists (private IP in upstream).
+resource "aws_s3_object" "nginx_edge" {
   bucket = module.config_bucket.bucket_id
-  key    = "bootstrap/nginx.conf"
-  source = "${path.module}/../nginx/nginx.conf"
-  etag   = filemd5("${path.module}/../nginx/nginx.conf")
+  key    = "bootstrap/nginx-edge.conf"
+  content = templatefile("${path.module}/nginx-edge.conf.tpl", {
+    litellm_private_ip = module.litellm_ec2.private_ip
+  })
+
+  depends_on = [module.litellm_ec2]
 }

@@ -17,6 +17,7 @@ locals {
   aws_account_id = data.aws_caller_identity.current.account_id
   vpc_id         = data.terraform_remote_state.networking.outputs.vpc_id
   subnet_id      = data.terraform_remote_state.networking.outputs.public_subnet_ids[0]
+  ec2_key_name   = var.generate_ssh_key_pair ? aws_key_pair.generated[0].key_name : (var.ec2_key_name != "" ? var.ec2_key_name : null)
 }
 
 module "config_bucket" {
@@ -27,24 +28,9 @@ module "config_bucket" {
   force_destroy = true
 }
 
-data "aws_iam_policy_document" "ec2_assume" {
-  statement {
-    actions = ["sts:AssumeRole"]
-    principals {
-      type        = "Service"
-      identifiers = ["ec2.amazonaws.com"]
-    }
-  }
-}
-
-resource "aws_iam_role" "ec2" {
-  name               = "${var.name}-ec2"
-  assume_role_policy = data.aws_iam_policy_document.ec2_assume.json
-}
-
-resource "aws_iam_role_policy_attachment" "ssm" {
-  role       = aws_iam_role.ec2.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+module "ec2_ssm" {
+  source = "../../../../modules/ec2-instance-profile-ssm"
+  name   = "${var.name}-ec2"
 }
 
 data "aws_iam_policy_document" "s3_config" {
@@ -63,13 +49,8 @@ data "aws_iam_policy_document" "s3_config" {
 
 resource "aws_iam_role_policy" "s3_config" {
   name   = "${var.name}-s3-config"
-  role   = aws_iam_role.ec2.id
+  role   = module.ec2_ssm.iam_role_name
   policy = data.aws_iam_policy_document.s3_config.json
-}
-
-resource "aws_iam_instance_profile" "ec2" {
-  name = "${var.name}-ec2"
-  role = aws_iam_role.ec2.name
 }
 
 resource "aws_cloudwatch_log_group" "ec2" {
@@ -91,12 +72,11 @@ data "aws_iam_policy_document" "cloudwatch_logs" {
 
 resource "aws_iam_role_policy" "cloudwatch_logs" {
   name   = "${var.name}-cloudwatch-logs"
-  role   = aws_iam_role.ec2.id
+  role   = module.ec2_ssm.iam_role_name
   policy = data.aws_iam_policy_document.cloudwatch_logs.json
 }
 
 locals {
-  # CloudWatch Agent file collector (installed in user_data).
   cw_agent_json = jsonencode({
     logs = {
       logs_collected = {
@@ -119,10 +99,10 @@ locals {
   })
 }
 
-# Edge: Vercel / clients → Nginx or Agent listeners (public-facing ports only).
+# Public edge: attached only to the Nginx EC2 (HTTP/S, optional SSH).
 resource "aws_security_group" "edge" {
   name        = "${var.name}-edge"
-  description = "Ingress for external callers (e.g. Vercel) to Nginx/Agent ports."
+  description = "Ingress for external callers to Nginx on this MVP stack."
   vpc_id      = local.vpc_id
 
   egress {
@@ -144,7 +124,7 @@ resource "aws_vpc_security_group_ingress_rule" "edge" {
   }
 
   security_group_id = aws_security_group.edge.id
-  description       = "Nginx_Agent_ports_from_configured-CIDRs"
+  description       = "HTTP_S_from_configured-CIDRs"
   from_port         = each.value.port
   to_port           = each.value.port
   ip_protocol       = "tcp"
@@ -162,10 +142,10 @@ resource "aws_vpc_security_group_ingress_rule" "ssh" {
   cidr_ipv4         = each.value
 }
 
-# LiteLLM: not open to the internet; same-VPC and edge-SG path only.
+# LiteLLM + Postgres: only this SG on the app instance; not reachable from the public Internet.
 resource "aws_security_group" "litellm" {
   name        = "${var.name}-litellm-internal"
-  description = "LiteLLM port restricted to VPC + edge security group."
+  description = "LiteLLM port from VPC and from Nginx edge host only."
   vpc_id      = local.vpc_id
 
   egress {
@@ -178,16 +158,16 @@ resource "aws_security_group" "litellm" {
 
 resource "aws_vpc_security_group_ingress_rule" "litellm_from_vpc" {
   security_group_id = aws_security_group.litellm.id
-  description       = "LiteLLM_from_VPC_CIDR_Docker_and_intra-VPC"
+  description       = "LiteLLM_from_VPC_CIDR"
   from_port         = var.litellm_port
   to_port           = var.litellm_port
   ip_protocol       = "tcp"
   cidr_ipv4         = data.aws_vpc.this.cidr_block
 }
 
-resource "aws_vpc_security_group_ingress_rule" "litellm_from_edge_sg" {
+resource "aws_vpc_security_group_ingress_rule" "litellm_from_nginx_edge_sg" {
   security_group_id            = aws_security_group.litellm.id
-  description                  = "LiteLLM_from_edge_SG_same_instance"
+  description                  = "LiteLLM_from_Nginx_EC2_edge_SG"
   from_port                    = var.litellm_port
   to_port                      = var.litellm_port
   ip_protocol                  = "tcp"
@@ -198,16 +178,20 @@ data "aws_ssm_parameter" "al2023_x86" {
   name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
 }
 
-resource "aws_instance" "this" {
+module "litellm_ec2" {
+  source = "../../../../modules/ec2-instance"
+
   ami                         = data.aws_ssm_parameter.al2023_x86.value
   instance_type               = var.instance_type
   subnet_id                   = local.subnet_id
-  vpc_security_group_ids      = [aws_security_group.edge.id, aws_security_group.litellm.id]
-  iam_instance_profile        = aws_iam_instance_profile.ec2.name
+  vpc_security_group_ids      = [aws_security_group.litellm.id]
+  iam_instance_profile        = module.ec2_ssm.instance_profile_name
   associate_public_ip_address = true
-  key_name                    = var.generate_ssh_key_pair ? aws_key_pair.generated[0].key_name : (var.ec2_key_name != "" ? var.ec2_key_name : null)
+  key_name                    = local.ec2_key_name
+  root_volume_size_gb         = var.volume_size_gb
+  instance_name               = "${var.name}-litellm"
 
-  user_data = templatefile("${path.module}/user-data.sh.tpl", {
+  user_data = templatefile("${path.module}/user-data-litellm.sh.tpl", {
     cw_agent_b64              = base64encode(local.cw_agent_json)
     bootstrap_bucket          = module.config_bucket.bucket_id
     aws_region                = var.aws_region
@@ -220,23 +204,41 @@ resource "aws_instance" "this" {
     github_deploy_ssm_name    = var.use_git_clone ? aws_ssm_parameter.github_deploy_private_key[0].name : ""
   })
 
-  # Static list only (provider requirement). S3 bootstrap always exists; git deploy key ordering is implicit via user_data referencing the SSM parameter when use_git_clone is true.
+  tags = {
+    Role = "litellm"
+  }
+
   depends_on = [
     aws_s3_object.litellm_compose,
     aws_s3_object.litellm_config_yaml,
-    aws_s3_object.litellm_nginx,
   ]
+}
 
-  root_block_device {
-    volume_size = var.volume_size_gb
-    volume_type = "gp3"
-  }
+module "nginx_ec2" {
+  source = "../../../../modules/ec2-instance"
 
-  metadata_options {
-    http_tokens = "required"
-  }
+  ami                         = data.aws_ssm_parameter.al2023_x86.value
+  instance_type               = var.nginx_instance_type
+  subnet_id                   = local.subnet_id
+  vpc_security_group_ids      = [aws_security_group.edge.id]
+  iam_instance_profile        = module.ec2_ssm.instance_profile_name
+  associate_public_ip_address = true
+  key_name                    = local.ec2_key_name
+  root_volume_size_gb         = var.nginx_volume_size_gb
+  instance_name               = "${var.name}-nginx-edge"
+
+  user_data = templatefile("${path.module}/user-data-nginx.sh.tpl", {
+    cw_agent_b64     = base64encode(local.cw_agent_json)
+    bootstrap_bucket = module.config_bucket.bucket_id
+    aws_region       = var.aws_region
+  })
 
   tags = {
-    Name = "${var.name}-ec2"
+    Role = "nginx-edge"
   }
+
+  depends_on = [
+    module.litellm_ec2,
+    aws_s3_object.nginx_edge,
+  ]
 }

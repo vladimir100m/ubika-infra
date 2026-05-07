@@ -1,0 +1,95 @@
+scheduler:
+  module: dagster.core.scheduler
+  class: DagsterDaemonScheduler
+
+run_coordinator:
+  module: dagster.core.run_coordinator
+  class: QueuedRunCoordinator
+  config:
+    max_concurrent_runs: 5
+    tag_concurrency_limits:
+      - key: "operation"
+        value: "example"
+        limit: 5
+
+run_launcher:
+  module: dagster_docker
+  class: DockerRunLauncher
+  config:
+    # Per-run containers must inherit the same env that long-running services use,
+    # otherwise asset ops cannot find the warehouse, INDEC tree, or LiteLLM proxy.
+    # Each name listed here MUST be set in the dagster_daemon process env (see
+    # docker-compose.yaml); otherwise the launcher raises at dequeue time.
+    # Optional overrides (e.g. INDEC_EPH_VARIABLES_PDF, LITELLM_VARIABLES_HTTP_TIMEOUT)
+    # are not listed: add them only after exporting them on dagster_daemon.
+    env_vars:
+      - DAGSTER_POSTGRES_USER
+      - DAGSTER_POSTGRES_PASSWORD
+      - DAGSTER_POSTGRES_DB
+      - DUCKDB_PATH
+      - INDEC_EPH_BASE
+      - INDEC_EPH_YEAR
+      - LITELLM_KEY
+      - LITELLM_PROXY_BASE
+      - LITELLM_VARIABLES_MODEL
+    network: dagster_network
+    container_kwargs:
+      # ``host.docker.internal`` lets per-run containers reach LiteLLM on the host.
+      extra_hosts:
+        host.docker.internal: host-gateway
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
+        - /tmp/io_manager_storage:/tmp/io_manager_storage
+        # Shared CSV input/output for csv_pipeline. Host path must be identical
+        # across all dev machines, hence /tmp/dagster_data (auto-shared on
+        # Docker Desktop). Override by editing this file if you need a different
+        # location; container_kwargs.volumes does not support env interpolation.
+        - /tmp/dagster_data:/opt/dagster/data
+        # Same warehouse and INDEC landing tree as the ``dagster_user_code`` service.
+        # ``container_kwargs.volumes`` does not support env interpolation, so the
+        # ``data-local`` host path is hard-coded; align with the Datacyber repo or
+        # use a symlink if your tree differs.
+        - datacyber-mcp_duckdb_data:/data
+        - /Users/vlad/project/datacyber/data-local:/data-local:ro
+
+run_storage:
+  module: dagster_postgres.run_storage
+  class: PostgresRunStorage
+  config:
+    postgres_db:
+      hostname: dagster_postgresql
+      username:
+        env: DAGSTER_POSTGRES_USER
+      password:
+        env: DAGSTER_POSTGRES_PASSWORD
+      db_name:
+        env: DAGSTER_POSTGRES_DB
+      port: 5432
+
+schedule_storage:
+  module: dagster_postgres.schedule_storage
+  class: PostgresScheduleStorage
+  config:
+    postgres_db:
+      hostname: dagster_postgresql
+      username:
+        env: DAGSTER_POSTGRES_USER
+      password:
+        env: DAGSTER_POSTGRES_PASSWORD
+      db_name:
+        env: DAGSTER_POSTGRES_DB
+      port: 5432
+
+event_log_storage:
+  module: dagster_postgres.event_log
+  class: PostgresEventLogStorage
+  config:
+    postgres_db:
+      hostname: dagster_postgresql
+      username:
+        env: DAGSTER_POSTGRES_USER
+      password:
+        env: DAGSTER_POSTGRES_PASSWORD
+      db_name:
+        env: DAGSTER_POSTGRES_DB
+      port: 5432

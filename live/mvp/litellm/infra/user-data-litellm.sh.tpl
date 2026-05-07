@@ -1,15 +1,29 @@
 #!/bin/bash
 set -euxo pipefail
-# Dirs and log must exist before exec: a failed early step can exit the script before mkdir runs.
-mkdir -p /opt/litellm/nginx
+mkdir -p /opt/litellm
 chmod 755 /opt/litellm
 touch /var/log/litellm-bootstrap.log
 exec >> /var/log/litellm-bootstrap.log 2>&1
 echo "=== litellm bootstrap start $(date -Is) ==="
 
-dnf install -y docker amazon-cloudwatch-agent awscli docker-compose-plugin
+dnf install -y docker amazon-cloudwatch-agent awscli
 systemctl enable --now docker
 usermod -aG docker ec2-user
+
+if dnf install -y docker-compose-plugin 2>/dev/null; then
+  :
+else
+  COMPOSE_VER="v2.32.4"
+  case "$(uname -m)" in
+    x86_64) COMPOSE_ARCH=x86_64 ;;
+    aarch64) COMPOSE_ARCH=aarch64 ;;
+    *) echo "No docker-compose-plugin RPM and no binary fallback for this arch"; exit 1 ;;
+  esac
+  mkdir -p /usr/local/lib/docker/cli-plugins
+  curl -fsSL "https://github.com/docker/compose/releases/download/$${COMPOSE_VER}/docker-compose-linux-$${COMPOSE_ARCH}" \
+    -o /usr/local/lib/docker/cli-plugins/docker-compose
+  chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+fi
 
 mkdir -p /opt/aws/amazon-cloudwatch-agent/etc
 echo '${cw_agent_b64}' | base64 -d > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
@@ -46,10 +60,8 @@ fi
 cd "$${COMPOSE_DIR}"
 docker compose up -d
 %{ else ~}
-# Terraform fills bucket/region at render time (no bash $ conflict).
 aws s3 cp "s3://${bootstrap_bucket}/bootstrap/docker-compose.yaml" /opt/litellm/docker-compose.yaml --region ${aws_region}
 aws s3 cp "s3://${bootstrap_bucket}/bootstrap/config.yaml" /opt/litellm/config.yaml --region ${aws_region}
-aws s3 cp "s3://${bootstrap_bucket}/bootstrap/nginx.conf" /opt/litellm/nginx/default.conf --region ${aws_region}
 
 if [[ ! -f /opt/litellm/.env ]]; then
   cat > /opt/litellm/.env <<'ENVEOF'

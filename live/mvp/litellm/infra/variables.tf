@@ -28,8 +28,20 @@ variable "networking_state_key" {
 
 variable "instance_type" {
   type        = string
-  description = "EC2 instance type (x86_64 AL2023 AMI)."
+  description = "LiteLLM EC2 instance type (x86_64 AL2023 AMI)."
   default     = "c7i-flex.large"
+}
+
+variable "nginx_instance_type" {
+  type        = string
+  description = "Nginx reverse-proxy EC2 instance type (public HTTP edge)."
+  default     = "t3.small"
+}
+
+variable "nginx_volume_size_gb" {
+  type        = number
+  description = "Root volume size (gp3) for the Nginx EC2 instance."
+  default     = 20
 }
 
 variable "edge_ingress_cidrs" {

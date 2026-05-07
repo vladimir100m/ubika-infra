@@ -1,0 +1,164 @@
+# Aligned with https://github.com/dagster-io/dagster/tree/master/examples/deploy_docker
+# Three long-running services (postgres, user-code gRPC server, webserver, daemon)
+# plus per-run containers launched by DockerRunLauncher via /var/run/docker.sock.
+#
+# Co-location with ../langfuse/docker-compose.yml and ../litellm/docker-compose.yaml:
+#   Langfuse binds 3000, 3030, 5432, 6379, 8123, 9000, 9090, 9091 on localhost.
+#   LiteLLM  binds 4000 and 127.0.0.1:5434.
+#   Dagster webserver is exposed on host port 3001 (mapped to container 3000)
+#   so it does not clash with Langfuse on 3000. Postgres is kept internal
+#   (no host port) to avoid any clash with the other Postgres services.
+
+services:
+  # Postgres DB used by Dagster for run storage, schedule storage, and event log storage.
+  dagster_postgresql:
+    image: postgres:16-alpine
+    container_name: dagster_postgresql
+    environment:
+      POSTGRES_USER: "postgres_user"
+      POSTGRES_PASSWORD: "postgres_password"
+      POSTGRES_DB: "postgres_db"
+    volumes:
+      - dagster-db-data:/var/lib/postgresql/data
+    networks:
+      - dagster_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres_user -d postgres_db"]
+      interval: 10s
+      timeout: 8s
+      retries: 5
+    restart: unless-stopped
+
+  # gRPC server that loads user code. DAGSTER_CURRENT_IMAGE tells the DockerRunLauncher
+  # to reuse this same image for per-run containers. Add more user-code services on
+  # their own ports and entries in workspace.yaml for additional code locations.
+  dagster_user_code:
+    # build:
+    #   context: .
+    #   dockerfile: ./Dockerfile_user_code
+    container_name: dagster_user_code
+    image: dagster_user_code_image
+    restart: always
+    environment:
+      DAGSTER_POSTGRES_USER: "postgres_user"
+      DAGSTER_POSTGRES_PASSWORD: "postgres_password"
+      DAGSTER_POSTGRES_DB: "postgres_db"
+      DAGSTER_CURRENT_IMAGE: "dagster_user_code_image"
+      DUCKDB_PATH: "/data/warehouse.duckdb"
+      INDEC_EPH_BASE: "/data-local/indec/mercado_laboral/EPH"
+      INDEC_EPH_YEAR: "2025"
+      # LiteLLM proxy on the host (same key the brain/litellm stack uses).
+      # ``host.docker.internal`` lets the user-code (and per-run) container
+      # reach the LiteLLM proxy bound on host port 4000.
+      # Must match LiteLLM's LITELLM_MASTER_KEY (see ../litellm/.env).
+      LITELLM_KEY: "${LITELLM_KEY:?Set LITELLM_KEY to LiteLLM master key}"
+      LITELLM_PROXY_BASE: "${LITELLM_PROXY_BASE:-http://host.docker.internal:4000}"
+      # Default aligned with ../litellm/config/config.yaml model_name.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Same named volume as Datacyber ``duckdb`` service (warehouse file).
+      - datacyber-mcp_duckdb_data:/data
+      # Absolute host path — set ``DATACYBER_DATA_LOCAL_HOST`` in ``.env`` if your tree differs.
+      - ${DATACYBER_DATA_LOCAL_HOST:-/Users/vlad/project/datacyber/data-local}:/data-local:ro
+    networks:
+      - dagster_network
+
+  # dagster-webserver (UI + GraphQL). Uses QueuedRunCoordinator, so runs it submits
+  # are queued and later dequeued by dagster-daemon.
+  dagster_webserver:
+    build:
+      context: .
+      dockerfile: ./Dockerfile_dagster
+    entrypoint:
+      - dagster-webserver
+      - -h
+      - "0.0.0.0"
+      - -p
+      - "3000"
+      # Explicit workspace: same file is COPY'd to $DAGSTER_HOME by Dockerfile_dagster;
+      # default is also ./workspace.yaml when WORKDIR is $DAGSTER_HOME, but -w avoids surprises.
+      # - -w
+      # - workspace.yaml
+    container_name: dagster_webserver
+    expose:
+      - "3000"
+    ports:
+      - "3001:3000"
+    environment:
+      DAGSTER_POSTGRES_USER: "postgres_user"
+      DAGSTER_POSTGRES_PASSWORD: "postgres_password"
+      DAGSTER_POSTGRES_DB: "postgres_db"
+      # Same forwarded set as ``dagster_daemon`` so behavior is consistent if the
+      # webserver ever launches runs directly.
+      DUCKDB_PATH: "/data/warehouse.duckdb"
+      INDEC_EPH_BASE: "/data-local/indec/mercado_laboral/EPH"
+      INDEC_EPH_YEAR: "2025"
+      LITELLM_KEY: "${LITELLM_KEY:?Set LITELLM_KEY to LiteLLM master key}"
+      LITELLM_PROXY_BASE: "${LITELLM_PROXY_BASE:-http://host.docker.internal:4000}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/io_manager_storage:/tmp/io_manager_storage
+      - /tmp/dagster_data:/opt/dagster/data
+    networks:
+      - dagster_network
+    depends_on:
+      dagster_postgresql:
+        condition: service_healthy
+      dagster_user_code:
+        condition: service_started
+    restart: unless-stopped
+
+  # dagster-daemon dequeues runs and evaluates schedules/sensors.
+  dagster_daemon:
+    build:
+      context: .
+      dockerfile: ./Dockerfile_dagster
+    entrypoint:
+      - dagster-daemon
+      - run
+      # - -w
+      # - workspace.yaml
+    container_name: dagster_daemon
+    restart: on-failure
+    ## add the .env file to the environment
+    env_file:
+      - .env
+    environment:
+      DAGSTER_POSTGRES_USER: "postgres_user"
+      DAGSTER_POSTGRES_PASSWORD: "postgres_password"
+      DAGSTER_POSTGRES_DB: "postgres_db"
+      # ``DockerRunLauncher.env_vars`` forwards these from the daemon's own
+      # environment into per-run containers spawned for assets like
+      # ``variables_eph``/``eph_year_usu``. Keep in sync with ``dagster.yaml``.
+      DUCKDB_PATH: "/data/warehouse.duckdb"
+      INDEC_EPH_BASE: "/data-local/indec/mercado_laboral/EPH"
+      INDEC_EPH_YEAR: "2025"
+      LITELLM_KEY: "${LITELLM_KEY:?Set LITELLM_KEY to LiteLLM master key}"
+      LITELLM_PROXY_BASE: "${LITELLM_PROXY_BASE:-http://host.docker.internal:4000}"
+      LITELLM_VARIABLES_MODEL: "${LITELLM_VARIABLES_MODEL:?Set LITELLM_VARIABLES_MODEL to LiteLLM variables model}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/io_manager_storage:/tmp/io_manager_storage
+      - /tmp/dagster_data:/opt/dagster/data
+    networks:
+      - dagster_network
+    depends_on:
+      dagster_postgresql:
+        condition: service_healthy
+      dagster_user_code:
+        condition: service_started
+
+networks:
+  dagster_network:
+    driver: bridge
+    name: dagster_network
+
+volumes:
+  dagster-db-data:
+  datacyber-mcp_duckdb_data:
+    external: true
